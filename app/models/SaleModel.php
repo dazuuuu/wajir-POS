@@ -394,10 +394,14 @@ class SaleModel extends Model
             }
 
             $items = $db->prepare(
-                "SELECT si.id, si.product_id, si.quantity, COALESCE(ret.returned_quantity,0) AS returned_quantity
+                "SELECT si.id, si.product_id, si.quantity,
+                        COALESCE(ret.restocked_quantity,0) AS restocked_quantity,
+                        COALESCE(ret.used_quantity,0) AS used_quantity
                    FROM sale_items si
               LEFT JOIN (
-                        SELECT tenant_id, source_item_id, SUM(returned_quantity) AS returned_quantity
+                        SELECT tenant_id, source_item_id,
+                               SUM(CASE WHEN migrated_at IS NOT NULL THEN restocked_quantity ELSE 0 END) AS restocked_quantity,
+                               SUM(CASE WHEN migrated_at IS NOT NULL THEN used_quantity ELSE 0 END) AS used_quantity
                           FROM product_returns
                          WHERE source_type = 'sale' AND undone_at IS NULL
                       GROUP BY tenant_id, source_item_id
@@ -405,13 +409,25 @@ class SaleModel extends Model
                   WHERE si.sale_id = ? AND si.tenant_id = ?"
             );
             $items->execute([$saleId, $tid]);
-            $restore = $db->prepare('UPDATE products SET quantity = quantity + ? WHERE id = ? AND tenant_id = ?');
+            $restore = $db->prepare(
+                'UPDATE products
+                    SET quantity = quantity + ?,
+                        faulty_quantity = GREATEST(COALESCE(faulty_quantity,0) - ?, 0)
+                  WHERE id = ? AND tenant_id = ?'
+            );
             foreach ($items->fetchAll() as $it) {
-                $qty = max(0, round((float) $it['quantity'] - (float) $it['returned_quantity'], 2));
-                if ($qty > 0 && !empty($it['product_id'])) {
-                    $restore->execute([$qty, (int) $it['product_id'], $tid]);
+                $qty = max(0, round((float) $it['quantity'] - (float) $it['restocked_quantity'], 2));
+                $used = max(0, round((float) $it['used_quantity'], 2));
+                if (($qty > 0 || $used > 0) && !empty($it['product_id'])) {
+                    $restore->execute([$qty, $used, (int) $it['product_id'], $tid]);
                 }
             }
+
+            $db->prepare(
+                "UPDATE product_returns
+                    SET undone_at = NOW(), undone_by = ?
+                  WHERE tenant_id = ? AND source_type = 'sale' AND source_id = ? AND undone_at IS NULL"
+            )->execute([$staffId, $tid, $saleId]);
 
             $db->prepare(
                 "UPDATE sales

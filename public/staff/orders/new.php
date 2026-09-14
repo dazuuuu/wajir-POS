@@ -37,7 +37,7 @@ $creditDurationDays = 14;
 $heldOrderId = 0;
 $openingDeposit = 0.0;
 $openingDepositMethod = 'cash';
-$canTakeOpeningDeposit = true; // Anyone authorized to open the credit sale may record its opening deposit.
+$canTakeOpeningDeposit = TenantContext::role() === 'tenant_owner' || TenantContext::can(Capabilities::PAYMENTS_PROCESS);
 $depositMethods = PaymentOptions::depositMethods($tenant);
 
 $normalizePriceType = static function ($type): string {
@@ -141,6 +141,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ]);
         if ($res['ok']) {
             $depositNote = '';
+            $depositOk = true;
             if ($openingDeposit > 0) {
                 $deposit = min($openingDeposit, max(0, round($subtotal - $discount + $additionalCharges, 2)));
                 $payment = $orderModel->markPaid((int) $res['order_id'], [
@@ -149,10 +150,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'amount_received' => $deposit,
                     'amount_tendered' => $openingDepositMethod === 'cash' ? $deposit : null,
                 ], TenantContext::userId());
-                $depositNote = $payment['ok']
-                    ? ' Opening deposit of KES ' . number_format($deposit, 2) . ' recorded by ' . ($depositMethods[$openingDepositMethod] ?? $openingDepositMethod) . '.'
-                    : ' The credit sale was opened, but its deposit was not recorded: ' . ($payment['error'] ?? 'unknown payment error') . '.';
+                if ($payment['ok']) {
+                    $depositNote = ' Opening deposit of KES ' . number_format($deposit, 2) . ' recorded by ' . ($depositMethods[$openingDepositMethod] ?? $openingDepositMethod) . '.';
+                } else {
+                    $reverted = $orderModel->deleteSale((int) $res['order_id'], TenantContext::userId());
+                    if ($reverted['ok']) {
+                        $depositOk = false;
+                        $error = 'The credit sale was cancelled and its stock restored because the opening deposit could not be recorded. Please try again.';
+                    } else {
+                        $depositNote = ' The credit sale was opened, but its deposit was not recorded. Record it from Payments immediately.';
+                    }
+                }
             }
+            if ($depositOk) {
             if ($heldOrderId > 0) { $HO->discard($heldOrderId); }
             $opened = $orderModel->find((int) $res['order_id']);
             $mailNote = '';
@@ -182,8 +192,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['flash']['success'] = 'Credit sale opened - ' . $res['receipt_number'] . '.' . $depositNote . $mailNote;
             header('Location: ' . $ordersViewBase . '?id=' . $res['order_id']);
             exit;
+            }
         }
-        $error = $res['errors']['_'] ?? ($res['errors']['table_name'] ?? 'Could not open this tab.');
+        if ($error === '') {
+            $error = $res['errors']['_'] ?? ($res['errors']['table_name'] ?? 'Could not open this tab.');
+        }
     }
 }
 

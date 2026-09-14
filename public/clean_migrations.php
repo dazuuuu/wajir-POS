@@ -120,12 +120,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     } elseif ($action === 'void_order') {
         $orderId = (int) ($_POST['order_id'] ?? 0);
-        $res = $O->deleteSale($orderId, $userId);
-        if ($res['ok']) {
-            $cleared = $N->clearCreditSaleAlerts($orderId);
-            $message = 'Credit invoice/order undone. Products were restored and its money was removed from business totals. ' . $cleared . ' matching alert(s) cleared.';
+        if (!hash_equals($cleanCsrf, (string) ($_POST['csrf'] ?? ''))) {
+            $error = 'This delete request expired. Reload the page and try again.';
         } else {
-            $error = $res['error'] ?? 'Could not void that order.';
+            $res = $O->deleteSale($orderId, $userId);
+            if ($res['ok']) {
+                $cleared = $N->clearCreditSaleAlerts($orderId);
+                $message = 'Credit invoice/order undone. Products were restored and its money was removed from business totals. ' . $cleared . ' matching alert(s) cleared.';
+            } else {
+                $error = $res['error'] ?? 'Could not void that order.';
+            }
         }
     } elseif (in_array($action, ['undo_order_sale', 'undo_direct_sale'], true)) {
         if (!hash_equals($cleanCsrf, (string) ($_POST['csrf'] ?? ''))) {
@@ -334,6 +338,7 @@ ob_start();
                   <form method="post" class="d-inline" onsubmit="return confirm('Void this credit invoice/order and restore its products to stock?');">
                     <input type="hidden" name="action" value="void_order">
                     <input type="hidden" name="order_id" value="<?php echo (int) $r['id']; ?>">
+                    <input type="hidden" name="csrf" value="<?php echo htmlspecialchars($cleanCsrf); ?>">
                     <button class="btn btn-sm btn-outline-danger">Void</button>
                   </form>
                 </td>

@@ -215,7 +215,13 @@ ob_start();
           <strong>KES <?php echo number_format((float) $order['total'], 2); ?></strong>
         </div>
         <?php if (!$payments): ?>
-          <div class="text-muted small py-2">No deposit has been recorded. The full opening sale remains on credit.</div>
+          <div class="text-muted small py-2">
+            <?php if ($amountPaid > 0): ?>
+              KES <?php echo number_format($amountPaid, 2); ?> is marked paid, but itemized payment history is unavailable for this older invoice.
+            <?php else: ?>
+              No deposit has been recorded. The full opening sale remains on credit.
+            <?php endif; ?>
+          </div>
         <?php else: ?>
           <?php foreach ($payments as $payment): ?>
             <div class="d-flex justify-content-between align-items-start border-bottom py-2 gap-3">

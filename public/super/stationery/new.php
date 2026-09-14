@@ -144,8 +144,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'package_buying_price' => $buyingPrice > 0 ? $buyingPrice : ($existing['package_buying_price'] ?? null),
                         'retail_price' => $sellingPrice > 0 ? $sellingPrice : ($existing['retail_price'] ?? 0),
                         'wholesale_price' => $unitWholesale > 0 ? $unitWholesale : ($existing['wholesale_price'] ?? 0),
-                        'units_per_pack' => $effectiveInside > 1 ? $effectiveInside : ($existing['units_per_pack'] ?? 1),
-                        'pack_unit' => $receiveUnit ?: ($existing['pack_unit'] ?? null),
+                        'units_per_pack' => (float) ($existing['units_per_pack'] ?? 1) > 1 ? $existing['units_per_pack'] : $effectiveInside,
+                        'pack_unit' => ($existing['pack_unit'] ?? null) ?: $receiveUnit,
                         'pack_price' => $wholesalePrice > 0 ? $wholesalePrice : ($existing['pack_price'] ?? null),
                         'retail_pack_price' => $retailPackPrice > 0 ? $retailPackPrice : ($existing['retail_pack_price'] ?? null),
                     ]));
@@ -590,6 +590,8 @@ ob_start();
     if (item.buying_price) document.getElementById('buyingPrice').value = item.buying_price;
     if (item.pack_price && document.getElementById('wholesalePrice')) document.getElementById('wholesalePrice').value = item.pack_price;
     if (item.retail_pack_price && document.getElementById('retailPackPrice')) document.getElementById('retailPackPrice').value = item.retail_pack_price;
+    if (item.pack_unit && document.getElementById('unitSelect')) document.getElementById('unitSelect').value = item.pack_unit;
+    if (item.units_per_pack > 1 && document.getElementById('unitsPerPackage')) document.getElementById('unitsPerPackage').value = item.units_per_pack;
     var bits = [item.category_name || item.subject_name, item.brand_name || item.publisher_name, item.unit].filter(Boolean);
     note.style.display = 'block';
     note.innerHTML = '<i class="fas fa-circle-check me-1"></i>Already in stock' +

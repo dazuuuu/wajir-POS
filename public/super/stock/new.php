@@ -229,8 +229,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             'package_buying_price' => $it['package_buying_price'] ?: ($curr['package_buying_price'] ?? null),
                             'retail_price' => $it['retail_price'] > 0 ? $it['retail_price'] : ($curr['retail_price'] ?? 0),
                             'wholesale_price' => $it['wholesale_price'] > 0 ? $it['wholesale_price'] : ($curr['wholesale_price'] ?? 0),
-                            'units_per_pack' => $it['units_per_package'] > 1 ? $it['units_per_package'] : ($curr['units_per_pack'] ?? 1),
-                            'pack_unit' => $it['package_unit'] ?: ($curr['pack_unit'] ?? null),
+                            'units_per_pack' => (float) ($curr['units_per_pack'] ?? 1) > 1 ? $curr['units_per_pack'] : ($it['units_per_package'] ?: 1),
+                            'pack_unit' => ($curr['pack_unit'] ?? null) ?: $it['package_unit'],
                             'pack_price' => $it['package_price'] ?: ($curr['pack_price'] ?? null),
                             'retail_pack_price' => $it['retail_pack_price'] ?: ($curr['retail_pack_price'] ?? null),
                         ]));
@@ -598,6 +598,8 @@ ob_start();
       if (item.retail_price) { row.querySelector('.retailPrice').value = item.retail_price; }
       if (item.wholesale_price) { row.querySelector('.wholesalePrice').value = item.pack_price && item.pack_price > 0 ? item.pack_price : item.wholesale_price; }
       if (item.retail_pack_price) { row.querySelector('.retailPackPrice').value = item.retail_pack_price; }
+      if (item.pack_unit && row.querySelector('.unitSelect')) { row.querySelector('.unitSelect').value = item.pack_unit; }
+      if (item.units_per_pack > 1 && row.querySelector('.unitsPerPackage')) { row.querySelector('.unitsPerPackage').value = item.units_per_pack; }
       row.querySelector('.qtyLabel').textContent = 'Qty to add';
       var bits = [item.category_name || item.subject_name, item.brand_name || item.publisher_name, item.unit].filter(Boolean);
       note.style.display = 'block';

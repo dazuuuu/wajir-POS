@@ -1323,7 +1323,7 @@ class OrderModel extends Model
         $db = $this->db;
         try {
             $db->beginTransaction();
-            $sel = $db->prepare('SELECT id, status, customer_id FROM orders WHERE id = ? AND tenant_id = ? FOR UPDATE');
+            $sel = $db->prepare('SELECT id, status, customer_id, COALESCE(loyalty_points_earned,0) AS loyalty_points_earned FROM orders WHERE id = ? AND tenant_id = ? FOR UPDATE');
             $sel->execute([$orderId, $tid]);
             $order = $sel->fetch();
             if (!$order) {
@@ -1336,10 +1336,14 @@ class OrderModel extends Model
             }
 
             $items = $db->prepare(
-                "SELECT oi.id, oi.product_id, oi.quantity, COALESCE(ret.returned_quantity,0) AS returned_quantity
+                "SELECT oi.id, oi.product_id, oi.quantity,
+                        COALESCE(ret.restocked_quantity,0) AS restocked_quantity,
+                        COALESCE(ret.used_quantity,0) AS used_quantity
                    FROM order_items oi
               LEFT JOIN (
-                        SELECT tenant_id, source_item_id, SUM(returned_quantity) AS returned_quantity
+                        SELECT tenant_id, source_item_id,
+                               SUM(CASE WHEN migrated_at IS NOT NULL THEN restocked_quantity ELSE 0 END) AS restocked_quantity,
+                               SUM(CASE WHEN migrated_at IS NOT NULL THEN used_quantity ELSE 0 END) AS used_quantity
                           FROM product_returns
                          WHERE source_type = 'order' AND undone_at IS NULL
                       GROUP BY tenant_id, source_item_id
@@ -1347,11 +1351,33 @@ class OrderModel extends Model
                   WHERE oi.order_id = ? AND oi.tenant_id = ?"
             );
             $items->execute([$orderId, $tid]);
-            $restore = $db->prepare('UPDATE products SET quantity = quantity + ? WHERE id = ? AND tenant_id = ?');
+            $restore = $db->prepare(
+                'UPDATE products
+                    SET quantity = quantity + ?,
+                        faulty_quantity = GREATEST(COALESCE(faulty_quantity,0) - ?, 0)
+                  WHERE id = ? AND tenant_id = ?'
+            );
             foreach ($items->fetchAll() as $it) {
-                $qty = max(0, round((float) $it['quantity'] - (float) $it['returned_quantity'], 2));
-                if ($qty > 0 && !empty($it['product_id'])) {
-                    $restore->execute([$qty, (int) $it['product_id'], $tid]);
+                $qty = max(0, round((float) $it['quantity'] - (float) $it['restocked_quantity'], 2));
+                $used = max(0, round((float) $it['used_quantity'], 2));
+                if (($qty > 0 || $used > 0) && !empty($it['product_id'])) {
+                    $restore->execute([$qty, $used, (int) $it['product_id'], $tid]);
+                }
+            }
+
+            $db->prepare(
+                "UPDATE product_returns
+                    SET undone_at = NOW(), undone_by = ?
+                  WHERE tenant_id = ? AND source_type = 'order' AND source_id = ? AND undone_at IS NULL"
+            )->execute([$staffId, $tid, $orderId]);
+
+            if (!empty($order['customer_id']) && (float) $order['loyalty_points_earned'] > 0) {
+                $customerModel = new CustomerModel($db);
+                $customer = $customerModel->find((int) $order['customer_id']);
+                $available = max(0, (float) ($customer['loyalty_points'] ?? 0));
+                $reverse = min($available, (float) $order['loyalty_points_earned']);
+                if ($reverse > 0) {
+                    $customerModel->adjustPoints((int) $order['customer_id'], -$reverse, 'Sale deleted and stock restored', $orderId, $staffId);
                 }
             }
 
