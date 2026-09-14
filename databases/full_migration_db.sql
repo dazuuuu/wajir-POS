@@ -791,9 +791,11 @@ ALTER TABLE products ADD COLUMN credit_limit DECIMAL(12,2) NULL AFTER low_stock_
 ALTER TABLE products ADD COLUMN low_stock_notified_at DATETIME NULL AFTER low_stock_threshold;
 ALTER TABLE products MODIFY COLUMN product_type ENUM('book','stationery','product') NOT NULL DEFAULT 'product';
 UPDATE products
-   SET retail_price = selling_price,
-       wholesale_price = selling_price
+   SET retail_price = selling_price
  WHERE retail_price = 0 AND selling_price > 0;
+UPDATE products
+   SET wholesale_price = selling_price
+ WHERE wholesale_price = 0 AND selling_price > 0;
 UPDATE products SET status = 'draft' WHERE status = 'inactive';
 ALTER TABLE products MODIFY status ENUM('active','draft','archived') NOT NULL DEFAULT 'active';
 ALTER TABLE products ADD KEY idx_prod_tenant (tenant_id);

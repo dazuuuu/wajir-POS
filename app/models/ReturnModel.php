@@ -436,8 +436,13 @@ class ReturnModel extends Model
         $hasSnapshot = is_array($snapshot) && isset($snapshot['total'], $snapshot['subtotal']);
         $subtotal = $hasSnapshot ? (float) $snapshot['subtotal'] : (float) $source['subtotal'] + $refundValue;
         $total = $hasSnapshot ? (float) $snapshot['total'] : (float) $source['total'] + $refundValue;
-        $paid = $hasSnapshot ? (float) $snapshot['amount_paid'] : (float) $source['amount_paid'];
-        $due = $hasSnapshot ? (float) $snapshot['amount_due'] : max(0, $total - $paid);
+        // Keep repayments recorded after the return instead of overwriting
+        // them with the older snapshot.
+        $snapshotPaid = $hasSnapshot ? (float) $snapshot['amount_paid'] : 0.0;
+        $paid = $hasSnapshot
+            ? min($total, max($snapshotPaid, (float) $source['amount_paid']))
+            : (float) $source['amount_paid'];
+        $due = max(0, $total - $paid);
 
         if ($sourceType === 'order') {
             if (!$hasSnapshot) {
@@ -446,8 +451,9 @@ class ReturnModel extends Model
                 $paid = min($total, (float) $pay->fetchColumn());
                 $due = max(0, $total - $paid);
             }
-            $status = $hasSnapshot ? (string) $snapshot['status'] : ($due <= 0.0001 ? 'paid' : 'open');
-            $paymentStatus = $hasSnapshot ? (string) $snapshot['payment_status'] : ($due <= 0.0001 ? 'paid' : ($paid > 0 ? 'part_paid' : 'credit'));
+            $hasLaterPayment = $hasSnapshot && $paid > $snapshotPaid + 0.0001;
+            $status = $hasSnapshot && !$hasLaterPayment ? (string) $snapshot['status'] : ($due <= 0.0001 ? 'paid' : 'open');
+            $paymentStatus = $hasSnapshot && !$hasLaterPayment ? (string) $snapshot['payment_status'] : ($due <= 0.0001 ? 'paid' : ($paid > 0 ? 'part_paid' : 'credit'));
             $this->db->prepare(
                 'UPDATE orders SET subtotal = ?, total = ?, amount_paid = ?, amount_due = ?, status = ?, payment_status = ?
                   WHERE id = ? AND tenant_id = ?'
@@ -459,8 +465,9 @@ class ReturnModel extends Model
             $paid = $total;
             $due = 0;
         }
+        $hasLaterPayment = $hasSnapshot && $paid > $snapshotPaid + 0.0001;
         $status = $hasSnapshot ? (string) $snapshot['status'] : 'completed';
-        $paymentStatus = $hasSnapshot ? (string) $snapshot['payment_status'] : ($due <= 0.0001 ? 'paid' : ($paid > 0 ? 'part_paid' : 'credit'));
+        $paymentStatus = $hasSnapshot && !$hasLaterPayment ? (string) $snapshot['payment_status'] : ($due <= 0.0001 ? 'paid' : ($paid > 0 ? 'part_paid' : 'credit'));
         $cash = $hasSnapshot ? ($snapshot['cash_amount'] ?? null) : ($source['cash_amount'] ?? null);
         $mpesa = $hasSnapshot ? ($snapshot['mpesa_amount'] ?? null) : ($source['mpesa_amount'] ?? null);
         $this->db->prepare(

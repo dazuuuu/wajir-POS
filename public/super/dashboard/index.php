@@ -355,7 +355,7 @@ $icon = fn(string $n, int $s = 18) => NavIcons::svg($n, $s);
 .act-icon{width:20px;height:20px;border-radius:50%;display:inline-flex!important;align-items:center;justify-content:center;background:var(--pos-violet-light);color:var(--pos-violet);margin-right:8px;vertical-align:middle;}
 .status{display:flex;align-items:center;gap:5px;}.status i{width:6px;height:6px;border-radius:50%;background:#36a67c;display:inline-block;}.status.pending i{background:#d8bd2d;}.dots{color:#8c8491;letter-spacing:2px;}
 .empty-state{text-align:center;color:#746d7a;padding:40px 0;}
-@media (max-width:1180px){.fin-grid{grid-template-columns:1fr 1fr;}.chart-panel,.activity-panel,.pnl-panel{grid-column:1 / -1;}.pnl-grid{grid-template-columns:repeat(3,minmax(0,1fr));}.activity-panel{grid-row:auto;}.limit-panel,.card-panel{grid-column:auto;}}
+@media (max-width:1450px){.fin-grid{grid-template-columns:1fr 1fr;}.chart-panel,.activity-panel,.pnl-panel{grid-column:1 / -1;}.pnl-grid{grid-template-columns:repeat(3,minmax(0,1fr));}.activity-panel{grid-row:auto;}.limit-panel,.card-panel{grid-column:auto;}}
 @media (max-width:760px){.fin-grid,.metric-grid,.pnl-grid{grid-template-columns:1fr;}.limit-panel,.card-panel,.activity-panel,.chart-panel,.pnl-panel{grid-column:auto;}.activity-head{display:none;}.activity-row{grid-template-columns:22px 1fr;}.activity-row span:nth-child(n+4){display:none;}.wallets{grid-template-columns:1fr;}.pnl-card strong{white-space:normal;}}
 </style>
 <?php

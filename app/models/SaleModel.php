@@ -713,7 +713,7 @@ class SaleModel extends Model
                        SUM(si.line_total) AS revenue,
                        SUM(
                            CASE
-                               WHEN si.price_type = 'wholesale'
+                               WHEN si.price_type IN ('wholesale','retail_pack')
                                     AND COALESCE(p.units_per_pack, 1) > 1
                                     AND COALESCE(p.pack_unit, '') <> ''
                                     AND p.package_buying_price IS NOT NULL
@@ -722,7 +722,16 @@ class SaleModel extends Model
                            END
                        ) AS cost,
                        SUM(CASE WHEN si.price_type IN ('retail','retail_pack') THEN si.line_total ELSE 0 END)
-                       - SUM(CASE WHEN si.price_type IN ('retail','retail_pack') THEN GREATEST(si.quantity - COALESCE(ret.returned_quantity,0), 0) * COALESCE(p.`{$costCol}`, 0) ELSE 0 END) AS retail_profit,
+                       - SUM(CASE WHEN si.price_type IN ('retail','retail_pack') THEN
+                           CASE
+                               WHEN si.price_type = 'retail_pack'
+                                    AND COALESCE(p.units_per_pack, 1) > 1
+                                    AND COALESCE(p.pack_unit, '') <> ''
+                                    AND p.package_buying_price IS NOT NULL
+                                   THEN (GREATEST(si.quantity - COALESCE(ret.returned_quantity,0), 0) / p.units_per_pack) * p.package_buying_price
+                               ELSE GREATEST(si.quantity - COALESCE(ret.returned_quantity,0), 0) * COALESCE(p.`{$costCol}`, 0)
+                           END
+                         ELSE 0 END) AS retail_profit,
                        SUM(CASE WHEN si.price_type = 'wholesale' THEN si.line_total ELSE 0 END)
                        - SUM(CASE WHEN si.price_type = 'wholesale' THEN
                            CASE

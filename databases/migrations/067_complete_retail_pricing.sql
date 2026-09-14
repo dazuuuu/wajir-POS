@@ -7,9 +7,12 @@ ALTER TABLE products ADD COLUMN retail_pack_price DECIMAL(12,2) NULL AFTER pack_
 ALTER TABLE products ADD COLUMN package_buying_price DECIMAL(12,2) NULL AFTER retail_pack_price;
 
 UPDATE products
-   SET retail_price = selling_price,
-       wholesale_price = selling_price
+   SET retail_price = selling_price
  WHERE retail_price = 0 AND selling_price > 0;
+
+UPDATE products
+   SET wholesale_price = selling_price
+ WHERE wholesale_price = 0 AND selling_price > 0;
 
 ALTER TABLE sale_items MODIFY COLUMN price_type ENUM('retail','retail_pack','wholesale') NOT NULL DEFAULT 'retail';
 ALTER TABLE order_items ADD COLUMN price_type ENUM('retail','retail_pack','wholesale') NOT NULL DEFAULT 'retail' AFTER unit_price;

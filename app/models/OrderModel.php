@@ -2009,7 +2009,7 @@ class OrderModel extends Model
                        SUM(oi.line_total * {$paidRatio}) AS revenue,
                        SUM(
                            CASE
-                               WHEN oi.price_type = 'wholesale'
+                               WHEN oi.price_type IN ('wholesale','retail_pack')
                                     AND COALESCE(p.units_per_pack, 1) > 1
                                     AND COALESCE(p.pack_unit, '') <> ''
                                     AND p.package_buying_price IS NOT NULL
@@ -2018,7 +2018,16 @@ class OrderModel extends Model
                            END
                        ) AS cost,
                        SUM(CASE WHEN oi.price_type IN ('retail','retail_pack') THEN oi.line_total * {$paidRatio} ELSE 0 END)
-                       - SUM(CASE WHEN oi.price_type IN ('retail','retail_pack') THEN GREATEST(oi.quantity - COALESCE(ret.returned_quantity,0), 0) * COALESCE(p.`{$costCol}`, 0) * {$paidRatio} ELSE 0 END) AS retail_profit,
+                       - SUM(CASE WHEN oi.price_type IN ('retail','retail_pack') THEN
+                           CASE
+                               WHEN oi.price_type = 'retail_pack'
+                                    AND COALESCE(p.units_per_pack, 1) > 1
+                                    AND COALESCE(p.pack_unit, '') <> ''
+                                    AND p.package_buying_price IS NOT NULL
+                                   THEN (GREATEST(oi.quantity - COALESCE(ret.returned_quantity,0), 0) / p.units_per_pack) * p.package_buying_price * {$paidRatio}
+                               ELSE GREATEST(oi.quantity - COALESCE(ret.returned_quantity,0), 0) * COALESCE(p.`{$costCol}`, 0) * {$paidRatio}
+                           END
+                         ELSE 0 END) AS retail_profit,
                        SUM(CASE WHEN oi.price_type = 'wholesale' THEN oi.line_total * {$paidRatio} ELSE 0 END)
                        - SUM(CASE WHEN oi.price_type = 'wholesale' THEN
                            CASE
