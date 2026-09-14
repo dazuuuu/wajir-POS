@@ -13,22 +13,57 @@ $receiptBase = $isStaffViewer ? public_url('staff/orders/receipt.php') : public_
 $saleReceiptBase = $isStaffViewer ? public_url('staff/sales/receipt.php') : public_url('super/sales/receipt.php');
 
 $error = '';
+$recentQuery = trim((string) ($_GET['return_q'] ?? ''));
+$canUndoReturns = TenantContext::role() === 'tenant_owner' || TenantContext::can(Capabilities::INVENTORY_EDIT);
+if (empty($_SESSION['returns_csrf'])) {
+    $_SESSION['returns_csrf'] = bin2hex(random_bytes(24));
+}
+$returnsCsrf = $_SESSION['returns_csrf'];
 $receiptQuery = trim($_GET['receipt'] ?? $_POST['receipt_number'] ?? '');
-$source = $receiptQuery !== '' ? $R->findReceipt($receiptQuery) : null;
+$requestedSourceType = strtolower(trim((string) ($_GET['source_type'] ?? $_POST['source_type'] ?? '')));
+$requestedSourceId = (int) ($_GET['source_id'] ?? $_POST['source_id'] ?? 0);
+$hasExactSource = in_array($requestedSourceType, ['order', 'sale'], true) && $requestedSourceId > 0;
+$source = $hasExactSource
+    ? $R->findSource($requestedSourceType, $requestedSourceId)
+    : ($receiptQuery !== '' ? $R->findReceipt($receiptQuery) : null);
 
 if ($receiptQuery !== '' && !$source) {
     $matches = $R->searchReceipts($receiptQuery, 1);
     if (count($matches) === 1) {
-        $source = $R->findReceipt((string) $matches[0]['receipt_number']);
+        $source = $R->findSource((string) $matches[0]['source_type'], (int) $matches[0]['id']);
     }
     if (!$source) $error = 'No sale found. Scan or enter the receipt / invoice number.';
+}
+
+$sourceUrl = function (array $row) use ($returnsBase): string {
+    return $returnsBase . '?' . http_build_query([
+        'receipt' => $row['receipt_number'],
+        'source_type' => $row['source_type'],
+        'source_id' => (int) $row['id'],
+    ]);
+};
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'undo_return') {
+    if (!$canUndoReturns) {
+        $error = 'You do not have permission to undo inventory returns.';
+    } elseif (!hash_equals($returnsCsrf, (string) ($_POST['csrf'] ?? ''))) {
+        $error = 'This undo request expired. Reload the page and try again.';
+    } else {
+        $res = $R->undo((int) ($_POST['return_id'] ?? 0), TenantContext::userId());
+        if ($res['ok']) {
+            $_SESSION['flash']['success'] = 'Return undone. Inventory and the original sale were restored.';
+            header('Location: ' . $returnsBase . ($recentQuery !== '' ? '?return_q=' . urlencode($recentQuery) : ''));
+            exit;
+        }
+        $error = $res['error'] ?? 'Could not undo this return.';
+    }
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'return_all' && $source) {
     $res = $R->returnAll((string)$_POST['source_type'], (int)$_POST['source_id'], TenantContext::userId());
     if ($res['ok']) {
         $_SESSION['flash']['success'] = 'Entire sale returned. Stock and sale totals were restored.';
-        header('Location: ' . $returnsBase . '?receipt=' . urlencode($receiptQuery)); exit;
+        header('Location: ' . $sourceUrl($source)); exit;
     }
     $error = $res['error'] ?? 'Could not return this sale.';
 }
@@ -45,14 +80,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'retur
     ], TenantContext::userId());
     if ($res['ok']) {
         $_SESSION['flash']['success'] = 'Product returned. Stock and sale totals were restored.';
-        header('Location: ' . $returnsBase . '?receipt=' . urlencode($receiptQuery));
+        header('Location: ' . $sourceUrl($source));
         exit;
     }
     $error = $res['error'] ?? 'Could not record the return.';
 }
 
 $items = $source ? $R->receiptItems($source['source_type'], (int) $source['id']) : [];
-$recent = $R->recent(80);
+$recent = $R->recent(250, $recentQuery);
 $page_title = 'Returns';
 ob_start();
 ?>
@@ -63,6 +98,8 @@ ob_start();
 <div class="card border-0 shadow-sm mb-4" style="border-radius:14px;">
   <div class="card-body p-4">
     <form method="get" class="row g-2 align-items-end" id="receiptSearchForm">
+      <input type="hidden" name="source_type" id="receiptSourceType" value="<?php echo $hasExactSource ? htmlspecialchars($requestedSourceType) : ''; ?>">
+      <input type="hidden" name="source_id" id="receiptSourceId" value="<?php echo $hasExactSource ? $requestedSourceId : 0; ?>">
       <div class="col-12 col-sm-8">
         <label class="form-label small mb-1 fw-semibold"><i class="fas fa-receipt me-1 text-primary"></i>Scan or enter receipt / invoice</label>
         <div class="position-relative">
@@ -162,23 +199,45 @@ ob_start();
 
 <div class="card border-0 shadow-sm" style="border-radius:14px;">
   <div class="card-body p-4">
-    <h2 class="h6 fw-bold mb-3"><i class="fas fa-clock-rotate-left me-2 text-primary"></i>Recent returns</h2>
+    <div class="d-flex justify-content-between align-items-end gap-3 flex-wrap mb-3">
+      <div>
+        <h2 class="h6 fw-bold mb-1"><i class="fas fa-clock-rotate-left me-2 text-primary"></i>Recent returns</h2>
+        <div class="text-muted small">Search and scroll through up to 250 active return records.</div>
+      </div>
+      <form method="get" class="d-flex gap-2" style="min-width:min(100%,360px);">
+        <input type="search" name="return_q" class="form-control form-control-sm" value="<?php echo htmlspecialchars($recentQuery); ?>" placeholder="Receipt, product, reason or staff">
+        <button class="btn btn-sm btn-outline-primary"><i class="fas fa-search"></i></button>
+        <?php if ($recentQuery !== ''): ?><a class="btn btn-sm btn-outline-secondary" href="<?php echo $returnsBase; ?>">Clear</a><?php endif; ?>
+      </form>
+    </div>
     <?php if (!$recent): ?>
-      <div class="text-muted small">No returns recorded yet.</div>
+      <div class="text-muted small"><?php echo $recentQuery !== '' ? 'No returns match that search.' : 'No returns recorded yet.'; ?></div>
     <?php else: ?>
-      <div class="table-responsive">
+      <div class="table-responsive" style="max-height:460px;overflow:auto;border:1px solid #eef0f4;border-radius:10px;">
         <table class="table table-sm align-middle mb-0">
-          <thead><tr class="text-muted small text-uppercase"><th>Receipt</th><th>Product</th><th>Returned</th><th>Used</th><th>Restocked</th><th>By</th><th>When</th></tr></thead>
+          <thead class="sticky-top bg-white"><tr class="text-muted small text-uppercase"><th>Receipt</th><th>Product</th><th>Returned</th><th>Used</th><th>Restocked</th><th>By</th><th>When</th><th>Action</th></tr></thead>
           <tbody>
             <?php foreach ($recent as $r): ?>
             <tr>
-              <td class="fw-semibold small"><?php echo htmlspecialchars($r['receipt_number']); ?></td>
+              <td class="fw-semibold small"><a href="<?php echo $returnsBase . '?' . http_build_query(['receipt' => $r['receipt_number'], 'source_type' => $r['source_type'], 'source_id' => (int) $r['source_id']]); ?>"><?php echo htmlspecialchars($r['receipt_number']); ?></a></td>
               <td class="small"><?php echo htmlspecialchars($r['product_name']); ?></td>
               <td class="small"><?php echo rtrim(rtrim(number_format((float) $r['returned_quantity'], 2), '0'), '.'); ?></td>
               <td class="small"><?php echo rtrim(rtrim(number_format((float) $r['used_quantity'], 2), '0'), '.'); ?></td>
               <td class="small"><?php echo rtrim(rtrim(number_format((float) $r['restocked_quantity'], 2), '0'), '.'); ?></td>
               <td class="small"><?php echo htmlspecialchars($r['processed_by_name'] ?? '—'); ?></td>
               <td class="small text-nowrap"><?php echo date('j M, g:i a', strtotime($r['created_at'])); ?></td>
+              <td class="small">
+                <?php if ($canUndoReturns): ?>
+                  <form method="post" onsubmit="return confirm('Undo this return and restore it to the original sale?');">
+                    <input type="hidden" name="action" value="undo_return">
+                    <input type="hidden" name="return_id" value="<?php echo (int) $r['id']; ?>">
+                    <input type="hidden" name="csrf" value="<?php echo htmlspecialchars($returnsCsrf); ?>">
+                    <button class="btn btn-sm btn-outline-danger text-nowrap"><i class="fas fa-rotate-right me-1"></i>Undo</button>
+                  </form>
+                <?php else: ?>
+                  <span class="text-muted">—</span>
+                <?php endif; ?>
+              </td>
             </tr>
             <?php endforeach; ?>
           </tbody>
@@ -204,6 +263,8 @@ document.querySelectorAll('.return-form').forEach(function (form) {
   var input = document.getElementById('receiptSearchInput');
   var menu = document.getElementById('receiptSuggestMenu');
   var form = document.getElementById('receiptSearchForm');
+  var sourceTypeInput = document.getElementById('receiptSourceType');
+  var sourceIdInput = document.getElementById('receiptSourceId');
   if (!input || !menu || !form) return;
 
   var apiUrl = <?php echo json_encode(public_url('api/returns/search_receipts.php')); ?>;
@@ -276,6 +337,8 @@ document.querySelectorAll('.return-form').forEach(function (form) {
   function chooseItem(item) {
     if (!item || !item.receipt_number) return;
     input.value = item.receipt_number;
+    if (sourceTypeInput) sourceTypeInput.value = item.source_type || '';
+    if (sourceIdInput) sourceIdInput.value = item.id || '';
     menu.style.display = 'none';
     form.submit();
   }
@@ -305,6 +368,8 @@ document.querySelectorAll('.return-form').forEach(function (form) {
   }
 
   input.addEventListener('input', function() {
+    if (sourceTypeInput) sourceTypeInput.value = '';
+    if (sourceIdInput) sourceIdInput.value = '';
     var q = input.value.trim();
     if (!q) {
       menu.style.display = 'none';
@@ -334,9 +399,10 @@ document.querySelectorAll('.return-form').forEach(function (form) {
       activeIndex = (activeIndex - 1 + buttons.length) % buttons.length;
       updateActive();
     } else if (e.key === 'Enter') {
-      if (activeIndex >= 0 && currentItems[activeIndex]) {
+      var selected = activeIndex >= 0 ? currentItems[activeIndex] : currentItems[0];
+      if (selected) {
         e.preventDefault();
-        chooseItem(currentItems[activeIndex]);
+        chooseItem(selected);
       }
     } else if (e.key === 'Escape') {
       menu.style.display = 'none';

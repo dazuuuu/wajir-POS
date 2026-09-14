@@ -113,6 +113,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $items = $O->items($id);
+$payments = $O->payments($id);
 $amountPaid = max(0, (float) ($order['amount_paid'] ?? 0));
 $amountDue = (float) ($order['amount_due'] ?? 0);
 if ($order['status'] === 'open' && $amountDue <= 0.0001) {
@@ -203,6 +204,42 @@ ob_start();
             <span class="fw-bold text-danger">KES <?php echo number_format($order['status'] === 'paid' ? 0 : $amountDue, 0); ?></span>
           </div>
         <?php endif; ?>
+      </div>
+    </div>
+
+    <div class="card border-0 shadow-sm mb-4" style="border-radius:14px;">
+      <div class="card-body p-4">
+        <h2 class="h6 mb-3">Credit balance &amp; deposits</h2>
+        <div class="d-flex justify-content-between border-bottom pb-2 mb-2">
+          <span>Opening credit sale</span>
+          <strong>KES <?php echo number_format((float) $order['total'], 2); ?></strong>
+        </div>
+        <?php if (!$payments): ?>
+          <div class="text-muted small py-2">
+            <?php if ($amountPaid > 0): ?>
+              KES <?php echo number_format($amountPaid, 2); ?> is marked paid, but itemized payment history is unavailable for this older invoice.
+            <?php else: ?>
+              No deposit has been recorded. The full opening sale remains on credit.
+            <?php endif; ?>
+          </div>
+        <?php else: ?>
+          <?php foreach ($payments as $payment): ?>
+            <div class="d-flex justify-content-between align-items-start border-bottom py-2 gap-3">
+              <div>
+                <div class="fw-semibold small"><?php echo htmlspecialchars(PaymentOptions::label($payment)); ?> deposit</div>
+                <div class="text-muted small">
+                  <?php echo date('j M Y, g:i a', strtotime($payment['created_at'])); ?>
+                  <?php if (!empty($payment['staff_name'])): ?> · <?php echo htmlspecialchars($payment['staff_name']); ?><?php endif; ?>
+                </div>
+              </div>
+              <strong class="text-success text-nowrap">KES <?php echo number_format((float) $payment['amount'], 2); ?></strong>
+            </div>
+          <?php endforeach; ?>
+        <?php endif; ?>
+        <div class="d-flex justify-content-between pt-3">
+          <span class="fw-semibold">Current credit balance</span>
+          <strong class="<?php echo $amountDue > 0 ? 'text-danger' : 'text-success'; ?>">KES <?php echo number_format($order['status'] === 'paid' ? 0 : $amountDue, 2); ?></strong>
+        </div>
       </div>
     </div>
 

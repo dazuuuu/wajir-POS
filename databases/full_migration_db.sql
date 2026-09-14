@@ -111,12 +111,6 @@ ALTER TABLE users ADD UNIQUE KEY uq_users_tenant_email (tenant_id, email);
 ALTER TABLE users ADD KEY idx_users_tenant (tenant_id);
 ALTER TABLE users ADD KEY idx_users_activation (activation_token);
 
--- Default platform super admin for the CMS admin panel (email: admin@ismano.com,
--- password: Admin123!). Change this password immediately after first login.
-INSERT INTO users (username, email, password_hash, role_id, is_active, email_verified)
-VALUES ('superadmin', 'admin@ismano.com', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 1, 1, 1)
-ON DUPLICATE KEY UPDATE username = username;
-
 CREATE TABLE IF NOT EXISTS user_profiles (
     user_id    INT PRIMARY KEY,
     first_name VARCHAR(100),
@@ -183,6 +177,7 @@ CREATE TABLE IF NOT EXISTS tenants (
     receipt_footer VARCHAR(255) NULL,
     kra_pin        VARCHAR(20)  NULL,
     payment_credentials TEXT NULL,
+    enabled_modules JSON NULL,
     created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uq_tenant_slug (slug),
@@ -702,7 +697,7 @@ CREATE TABLE IF NOT EXISTS book_attributes (
 CREATE TABLE IF NOT EXISTS products (
     id                     INT AUTO_INCREMENT PRIMARY KEY,
     tenant_id              INT NOT NULL,
-    product_type           ENUM('book','stationery') NOT NULL DEFAULT 'book',
+    product_type           ENUM('book','stationery','product') NOT NULL DEFAULT 'product',
     category_id            INT NULL,
     subcategory_id         INT NULL,
     grade_id               INT NULL,
@@ -715,13 +710,20 @@ CREATE TABLE IF NOT EXISTS products (
     name                   VARCHAR(160) NOT NULL,
     description            TEXT NULL,
     quantity               DECIMAL(12,2) NOT NULL DEFAULT 0,
+    faulty_quantity        DECIMAL(12,2) NOT NULL DEFAULT 0,
     unit                   VARCHAR(20) NOT NULL DEFAULT 'piece',   -- piece,g,kg,tonne,ml,litre
+    units_per_pack         DECIMAL(12,2) NOT NULL DEFAULT 1,
+    pack_unit              VARCHAR(20) NULL,
+    pack_price             DECIMAL(12,2) NULL,
+    retail_pack_price      DECIMAL(12,2) NULL,
+    package_buying_price   DECIMAL(12,2) NULL,
     size_value             DECIMAL(10,2) NULL,
     size_unit              ENUM('ml','l') NULL,
     buying_price           DECIMAL(12,2) NOT NULL DEFAULT 0,
     selling_price          DECIMAL(12,2) NOT NULL DEFAULT 0,
     wholesale_price        DECIMAL(12,2) NOT NULL DEFAULT 0,
     retail_price           DECIMAL(12,2) NOT NULL DEFAULT 0,
+    tax_rate               DECIMAL(5,2) NULL,
     offer_price            DECIMAL(12,2) NULL,
     offer_starts_at        DATETIME NULL,
     offer_ends_at          DATETIME NULL,
@@ -754,7 +756,7 @@ ALTER TABLE products DROP FOREIGN KEY products_ibfk_2;
 ALTER TABLE products MODIFY slug VARCHAR(255) NULL;
 ALTER TABLE products MODIFY price DECIMAL(10,2) NULL;
 ALTER TABLE products ADD COLUMN tenant_id INT NOT NULL DEFAULT 0 AFTER id;
-ALTER TABLE products ADD COLUMN product_type ENUM('book','stationery') NOT NULL DEFAULT 'book' AFTER tenant_id;
+ALTER TABLE products ADD COLUMN product_type ENUM('book','stationery','product') NOT NULL DEFAULT 'product' AFTER tenant_id;
 ALTER TABLE products ADD COLUMN subcategory_id INT NULL AFTER category_id;
 ALTER TABLE products ADD COLUMN grade_id INT NULL AFTER subcategory_id;
 ALTER TABLE products ADD COLUMN publisher_id INT NULL AFTER grade_id;
@@ -764,13 +766,20 @@ ALTER TABLE products ADD COLUMN brand_id INT NULL AFTER edition_id;
 ALTER TABLE products ADD COLUMN barcode VARCHAR(64) NULL AFTER brand_id;
 ALTER TABLE products ADD COLUMN supplier_id INT NULL AFTER barcode;
 ALTER TABLE products ADD COLUMN quantity DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER description;
+ALTER TABLE products ADD COLUMN faulty_quantity DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER quantity;
 ALTER TABLE products ADD COLUMN unit VARCHAR(20) NOT NULL DEFAULT 'piece' AFTER quantity;
+ALTER TABLE products ADD COLUMN units_per_pack DECIMAL(12,2) NOT NULL DEFAULT 1 AFTER unit;
+ALTER TABLE products ADD COLUMN pack_unit VARCHAR(20) NULL AFTER units_per_pack;
+ALTER TABLE products ADD COLUMN pack_price DECIMAL(12,2) NULL AFTER pack_unit;
+ALTER TABLE products ADD COLUMN retail_pack_price DECIMAL(12,2) NULL AFTER pack_price;
+ALTER TABLE products ADD COLUMN package_buying_price DECIMAL(12,2) NULL AFTER retail_pack_price;
 ALTER TABLE products ADD COLUMN size_value DECIMAL(10,2) NULL AFTER unit;
 ALTER TABLE products ADD COLUMN size_unit ENUM('ml','l') NULL AFTER size_value;
 ALTER TABLE products ADD COLUMN buying_price DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER size_unit;
 ALTER TABLE products ADD COLUMN selling_price DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER buying_price;
 ALTER TABLE products ADD COLUMN wholesale_price DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER selling_price;
 ALTER TABLE products ADD COLUMN retail_price DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER wholesale_price;
+ALTER TABLE products ADD COLUMN tax_rate DECIMAL(5,2) NULL AFTER retail_price;
 ALTER TABLE products ADD COLUMN offer_price DECIMAL(12,2) NULL AFTER retail_price;
 ALTER TABLE products ADD COLUMN offer_starts_at DATETIME NULL AFTER offer_price;
 ALTER TABLE products ADD COLUMN offer_ends_at DATETIME NULL AFTER offer_starts_at;
@@ -780,6 +789,13 @@ ALTER TABLE products ADD COLUMN image_path VARCHAR(255) NULL AFTER sizes;
 ALTER TABLE products ADD COLUMN low_stock_threshold INT NOT NULL DEFAULT 10 AFTER image_path;
 ALTER TABLE products ADD COLUMN credit_limit DECIMAL(12,2) NULL AFTER low_stock_threshold;
 ALTER TABLE products ADD COLUMN low_stock_notified_at DATETIME NULL AFTER low_stock_threshold;
+ALTER TABLE products MODIFY COLUMN product_type ENUM('book','stationery','product') NOT NULL DEFAULT 'product';
+UPDATE products
+   SET retail_price = selling_price
+ WHERE retail_price = 0 AND selling_price > 0;
+UPDATE products
+   SET wholesale_price = selling_price
+ WHERE wholesale_price = 0 AND selling_price > 0;
 UPDATE products SET status = 'draft' WHERE status = 'inactive';
 ALTER TABLE products MODIFY status ENUM('active','draft','archived') NOT NULL DEFAULT 'active';
 ALTER TABLE products ADD KEY idx_prod_tenant (tenant_id);
@@ -882,7 +898,7 @@ CREATE TABLE IF NOT EXISTS sale_items (
     product_name VARCHAR(160) NOT NULL,                -- snapshot at sale time
     unit         VARCHAR(20) NOT NULL DEFAULT 'piece',
     unit_price   DECIMAL(12,2) NOT NULL,                -- snapshot of the price charged
-    price_type   ENUM('retail','wholesale') NOT NULL DEFAULT 'retail',
+    price_type   ENUM('retail','retail_pack','wholesale') NOT NULL DEFAULT 'retail',
     unit_cost    DECIMAL(12,2) NOT NULL DEFAULT 0,       -- snapshot of buying_price, for margin reports
     quantity     DECIMAL(12,2) NOT NULL,
     line_total   DECIMAL(12,2) NOT NULL,
@@ -890,7 +906,8 @@ CREATE TABLE IF NOT EXISTS sale_items (
     KEY idx_item_tenant (tenant_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-ALTER TABLE sale_items ADD COLUMN price_type ENUM('retail','wholesale') NOT NULL DEFAULT 'retail' AFTER unit_price;
+ALTER TABLE sale_items ADD COLUMN price_type ENUM('retail','retail_pack','wholesale') NOT NULL DEFAULT 'retail' AFTER unit_price;
+ALTER TABLE sale_items MODIFY COLUMN price_type ENUM('retail','retail_pack','wholesale') NOT NULL DEFAULT 'retail';
 ALTER TABLE sale_items ADD COLUMN unit_cost DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER price_type;
 
 -- Installment payments against a credit/part-paid sale.
@@ -992,6 +1009,9 @@ CREATE TABLE IF NOT EXISTS order_items (
     product_id   INT NULL,
     product_name VARCHAR(160) NOT NULL,
     unit_price   DECIMAL(12,2) NOT NULL,
+    price_type   ENUM('retail','retail_pack','wholesale') NOT NULL DEFAULT 'retail',
+    base_unit_price DECIMAL(12,2) NULL,
+    commission_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
     quantity     DECIMAL(12,2) NOT NULL,
     line_total   DECIMAL(12,2) NOT NULL,
     added_by     INT NOT NULL,
@@ -999,6 +1019,11 @@ CREATE TABLE IF NOT EXISTS order_items (
     KEY idx_orderitem_order (order_id),
     KEY idx_orderitem_tenant (tenant_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+ALTER TABLE order_items ADD COLUMN price_type ENUM('retail','retail_pack','wholesale') NOT NULL DEFAULT 'retail' AFTER unit_price;
+ALTER TABLE order_items ADD COLUMN base_unit_price DECIMAL(12,2) NULL AFTER unit_price;
+ALTER TABLE order_items ADD COLUMN commission_amount DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER base_unit_price;
+ALTER TABLE order_items MODIFY COLUMN price_type ENUM('retail','retail_pack','wholesale') NOT NULL DEFAULT 'retail';
 
 CREATE TABLE IF NOT EXISTS product_returns (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -1017,14 +1042,22 @@ CREATE TABLE IF NOT EXISTS product_returns (
     processed_by INT NULL,
     migrated_at DATETIME NULL,
     migrated_by INT NULL,
+    financial_snapshot JSON NULL,
+    undone_at DATETIME NULL,
+    undone_by INT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     KEY idx_returns_source (tenant_id, source_type, source_id),
     KEY idx_returns_item (tenant_id, source_type, source_item_id),
-    KEY idx_returns_product (tenant_id, product_id)
+    KEY idx_returns_product (tenant_id, product_id),
+    KEY idx_returns_active (tenant_id, undone_at, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 ALTER TABLE product_returns ADD COLUMN migrated_at DATETIME NULL AFTER processed_by;
 ALTER TABLE product_returns ADD COLUMN migrated_by INT NULL AFTER migrated_at;
+ALTER TABLE product_returns ADD COLUMN financial_snapshot JSON NULL AFTER migrated_by;
+ALTER TABLE product_returns ADD COLUMN undone_at DATETIME NULL AFTER financial_snapshot;
+ALTER TABLE product_returns ADD COLUMN undone_by INT NULL AFTER undone_at;
+ALTER TABLE product_returns ADD KEY idx_returns_active (tenant_id, undone_at, created_at);
 
 -- "Hold Order": a cart set aside before it becomes a real sale/tab. Holding
 -- does NOT touch stock — nothing is committed until it's resumed.
@@ -1044,10 +1077,14 @@ CREATE TABLE IF NOT EXISTS held_order_items (
     product_id     INT NULL,
     product_name   VARCHAR(160) NOT NULL,
     unit_price     DECIMAL(12,2) NOT NULL,
+    price_type     ENUM('retail','retail_pack','wholesale') NOT NULL DEFAULT 'retail',
     quantity       DECIMAL(12,2) NOT NULL,
     KEY idx_helditem_held (held_order_id),
     KEY idx_helditem_tenant (tenant_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+ALTER TABLE held_order_items ADD COLUMN price_type ENUM('retail','retail_pack','wholesale') NOT NULL DEFAULT 'retail' AFTER unit_price;
+ALTER TABLE held_order_items MODIFY COLUMN price_type ENUM('retail','retail_pack','wholesale') NOT NULL DEFAULT 'retail';
 
 -- Clock in / clock out records for staff. One open (clock_out_at IS NULL)
 -- row per staff member at a time.
@@ -1095,9 +1132,8 @@ CREATE TABLE IF NOT EXISTS audit_log (
 
 -- =============================================================================
 -- Done. Next steps:
---   1. Log in as admin@ismano.com (password Admin123!) and change the password.
---   2. Register your first shop/tenant through the app's registration flow —
---      this creates the tenant + owner user + subscription rows for you.
+--   1. Open /support/ and create the shop's primary owner account.
+--   2. Choose the POS modules the shop needs, sign in, then lock setup.
 --   3. If you actually need the old online storefront revived, wire its
 --      routes/models intentionally instead of replaying the historical
 --      migration files.

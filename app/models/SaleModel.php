@@ -10,6 +10,7 @@ class SaleModel extends Model
     {
         parent::__construct($db);
         $this->ensureSchema();
+        ReturnModel::ensureTableExists($this->db);
     }
 
     /**
@@ -393,24 +394,40 @@ class SaleModel extends Model
             }
 
             $items = $db->prepare(
-                "SELECT si.id, si.product_id, si.quantity, COALESCE(ret.returned_quantity,0) AS returned_quantity
+                "SELECT si.id, si.product_id, si.quantity,
+                        COALESCE(ret.restocked_quantity,0) AS restocked_quantity,
+                        COALESCE(ret.used_quantity,0) AS used_quantity
                    FROM sale_items si
               LEFT JOIN (
-                        SELECT tenant_id, source_item_id, SUM(returned_quantity) AS returned_quantity
+                        SELECT tenant_id, source_item_id,
+                               SUM(CASE WHEN migrated_at IS NOT NULL THEN restocked_quantity ELSE 0 END) AS restocked_quantity,
+                               SUM(CASE WHEN migrated_at IS NOT NULL THEN used_quantity ELSE 0 END) AS used_quantity
                           FROM product_returns
-                         WHERE source_type = 'sale'
+                         WHERE source_type = 'sale' AND undone_at IS NULL
                       GROUP BY tenant_id, source_item_id
                    ) ret ON ret.tenant_id = si.tenant_id AND ret.source_item_id = si.id
                   WHERE si.sale_id = ? AND si.tenant_id = ?"
             );
             $items->execute([$saleId, $tid]);
-            $restore = $db->prepare('UPDATE products SET quantity = quantity + ? WHERE id = ? AND tenant_id = ?');
+            $restore = $db->prepare(
+                'UPDATE products
+                    SET quantity = quantity + ?,
+                        faulty_quantity = GREATEST(COALESCE(faulty_quantity,0) - ?, 0)
+                  WHERE id = ? AND tenant_id = ?'
+            );
             foreach ($items->fetchAll() as $it) {
-                $qty = max(0, round((float) $it['quantity'] - (float) $it['returned_quantity'], 2));
-                if ($qty > 0 && !empty($it['product_id'])) {
-                    $restore->execute([$qty, (int) $it['product_id'], $tid]);
+                $qty = max(0, round((float) $it['quantity'] - (float) $it['restocked_quantity'], 2));
+                $used = max(0, round((float) $it['used_quantity'], 2));
+                if (($qty > 0 || $used > 0) && !empty($it['product_id'])) {
+                    $restore->execute([$qty, $used, (int) $it['product_id'], $tid]);
                 }
             }
+
+            $db->prepare(
+                "UPDATE product_returns
+                    SET undone_at = NOW(), undone_by = ?
+                  WHERE tenant_id = ? AND source_type = 'sale' AND source_id = ? AND undone_at IS NULL"
+            )->execute([$staffId, $tid, $saleId]);
 
             $db->prepare(
                 "UPDATE sales
@@ -712,7 +729,7 @@ class SaleModel extends Model
                        SUM(si.line_total) AS revenue,
                        SUM(
                            CASE
-                               WHEN si.price_type = 'wholesale'
+                               WHEN si.price_type IN ('wholesale','retail_pack')
                                     AND COALESCE(p.units_per_pack, 1) > 1
                                     AND COALESCE(p.pack_unit, '') <> ''
                                     AND p.package_buying_price IS NOT NULL
@@ -720,8 +737,17 @@ class SaleModel extends Model
                                ELSE GREATEST(si.quantity - COALESCE(ret.returned_quantity,0), 0) * COALESCE(p.`{$costCol}`, 0)
                            END
                        ) AS cost,
-                       SUM(CASE WHEN si.price_type = 'retail' THEN si.line_total ELSE 0 END)
-                       - SUM(CASE WHEN si.price_type = 'retail' THEN GREATEST(si.quantity - COALESCE(ret.returned_quantity,0), 0) * COALESCE(p.`{$costCol}`, 0) ELSE 0 END) AS retail_profit,
+                       SUM(CASE WHEN si.price_type IN ('retail','retail_pack') THEN si.line_total ELSE 0 END)
+                       - SUM(CASE WHEN si.price_type IN ('retail','retail_pack') THEN
+                           CASE
+                               WHEN si.price_type = 'retail_pack'
+                                    AND COALESCE(p.units_per_pack, 1) > 1
+                                    AND COALESCE(p.pack_unit, '') <> ''
+                                    AND p.package_buying_price IS NOT NULL
+                                   THEN (GREATEST(si.quantity - COALESCE(ret.returned_quantity,0), 0) / p.units_per_pack) * p.package_buying_price
+                               ELSE GREATEST(si.quantity - COALESCE(ret.returned_quantity,0), 0) * COALESCE(p.`{$costCol}`, 0)
+                           END
+                         ELSE 0 END) AS retail_profit,
                        SUM(CASE WHEN si.price_type = 'wholesale' THEN si.line_total ELSE 0 END)
                        - SUM(CASE WHEN si.price_type = 'wholesale' THEN
                            CASE
@@ -738,7 +764,7 @@ class SaleModel extends Model
              LEFT JOIN (
                     SELECT tenant_id, source_item_id, SUM(returned_quantity) AS returned_quantity
                       FROM product_returns
-                     WHERE source_type = 'sale'
+                     WHERE source_type = 'sale' AND undone_at IS NULL
                   GROUP BY tenant_id, source_item_id
              ) ret ON ret.tenant_id = si.tenant_id AND ret.source_item_id = si.id
                  WHERE si.tenant_id = ? AND s.status <> 'voided' {$periodSql}

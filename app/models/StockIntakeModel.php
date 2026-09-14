@@ -60,7 +60,13 @@ class StockIntakeModel extends Model
             $intakeId = (int) $db->lastInsertId();
 
             $bump = $db->prepare(
-                'UPDATE products SET quantity = quantity + ?, buying_price = ?, package_buying_price = ?, unit = ?, units_per_pack = ?, pack_unit = ?, pack_price = ?, retail_pack_price = ? WHERE id = ? AND tenant_id = ?'
+                "UPDATE products SET quantity = quantity + ?, buying_price = ?,
+                    package_buying_price = COALESCE(?, package_buying_price), unit = ?,
+                    units_per_pack = COALESCE(?, units_per_pack),
+                    pack_unit = COALESCE(NULLIF(?, ''), pack_unit),
+                    pack_price = COALESCE(?, pack_price),
+                    retail_pack_price = COALESCE(?, retail_pack_price)
+                  WHERE id = ? AND tenant_id = ?"
             );
 
             foreach ($items as $i) {
@@ -84,7 +90,8 @@ class StockIntakeModel extends Model
                         return ['ok' => false, 'intake_id' => null, 'errors' => ['_' => 'One of the selected products was not found.']];
                     }
                     $packageBuying = ($i['package_buying_price'] ?? '') !== '' ? (float) $i['package_buying_price'] : null;
-                    $bump->execute([$qty, $buying, $packageBuying, $unit, $unitsPerPackage, $packageUnit, $packagePrice, $retailPackPrice, $productId, $tid]);
+                    $packSize = $unitsPerPackage > 1 ? $unitsPerPackage : null;
+                    $bump->execute([$qty, $buying, $packageBuying, $unit, $packSize, $packageUnit ?? '', $packagePrice, $retailPackPrice, $productId, $tid]);
                     $productName = $prod['name'];
                     $faulty = max(0, (float) ($i['faulty_quantity'] ?? 0));
                     if ($faulty > 0) {

@@ -21,6 +21,7 @@ class OrderModel extends Model
     {
         parent::__construct($db);
         $this->ensurePaymentSchema();
+        ReturnModel::ensureTableExists($this->db);
     }
 
     /**
@@ -1322,7 +1323,7 @@ class OrderModel extends Model
         $db = $this->db;
         try {
             $db->beginTransaction();
-            $sel = $db->prepare('SELECT id, status, customer_id FROM orders WHERE id = ? AND tenant_id = ? FOR UPDATE');
+            $sel = $db->prepare('SELECT id, status, customer_id, COALESCE(loyalty_points_earned,0) AS loyalty_points_earned FROM orders WHERE id = ? AND tenant_id = ? FOR UPDATE');
             $sel->execute([$orderId, $tid]);
             $order = $sel->fetch();
             if (!$order) {
@@ -1335,22 +1336,52 @@ class OrderModel extends Model
             }
 
             $items = $db->prepare(
-                "SELECT oi.id, oi.product_id, oi.quantity, COALESCE(ret.returned_quantity,0) AS returned_quantity
+                "SELECT oi.id, oi.product_id, oi.quantity,
+                        COALESCE(ret.restocked_quantity,0) AS restocked_quantity,
+                        COALESCE(ret.used_quantity,0) AS used_quantity
                    FROM order_items oi
               LEFT JOIN (
-                        SELECT tenant_id, source_item_id, SUM(returned_quantity) AS returned_quantity
+                        SELECT tenant_id, source_item_id,
+                               SUM(CASE WHEN migrated_at IS NOT NULL THEN restocked_quantity ELSE 0 END) AS restocked_quantity,
+                               SUM(CASE WHEN migrated_at IS NOT NULL THEN used_quantity ELSE 0 END) AS used_quantity
                           FROM product_returns
-                         WHERE source_type = 'order'
+                         WHERE source_type = 'order' AND undone_at IS NULL
                       GROUP BY tenant_id, source_item_id
                    ) ret ON ret.tenant_id = oi.tenant_id AND ret.source_item_id = oi.id
                   WHERE oi.order_id = ? AND oi.tenant_id = ?"
             );
             $items->execute([$orderId, $tid]);
-            $restore = $db->prepare('UPDATE products SET quantity = quantity + ? WHERE id = ? AND tenant_id = ?');
+            $restore = $db->prepare(
+                'UPDATE products
+                    SET quantity = quantity + ?,
+                        faulty_quantity = GREATEST(COALESCE(faulty_quantity,0) - ?, 0)
+                  WHERE id = ? AND tenant_id = ?'
+            );
             foreach ($items->fetchAll() as $it) {
-                $qty = max(0, round((float) $it['quantity'] - (float) $it['returned_quantity'], 2));
-                if ($qty > 0 && !empty($it['product_id'])) {
-                    $restore->execute([$qty, (int) $it['product_id'], $tid]);
+                $qty = max(0, round((float) $it['quantity'] - (float) $it['restocked_quantity'], 2));
+                $used = max(0, round((float) $it['used_quantity'], 2));
+                if (($qty > 0 || $used > 0) && !empty($it['product_id'])) {
+                    $restore->execute([$qty, $used, (int) $it['product_id'], $tid]);
+                }
+            }
+
+            $db->prepare(
+                "UPDATE product_returns
+                    SET undone_at = NOW(), undone_by = ?
+                  WHERE tenant_id = ? AND source_type = 'order' AND source_id = ? AND undone_at IS NULL"
+            )->execute([$staffId, $tid, $orderId]);
+
+            if (!empty($order['customer_id']) && (float) $order['loyalty_points_earned'] > 0) {
+                $customerModel = new CustomerModel($db);
+                if (!$customerModel->adjustPoints(
+                    (int) $order['customer_id'],
+                    -(float) $order['loyalty_points_earned'],
+                    'Sale deleted and stock restored',
+                    $orderId,
+                    $staffId,
+                    true
+                )) {
+                    throw new \RuntimeException('Could not reverse loyalty points for the deleted sale.');
                 }
             }
 
@@ -1975,7 +2006,7 @@ class OrderModel extends Model
           LEFT JOIN (
                     SELECT tenant_id, source_item_id, SUM(returned_quantity) AS returned_quantity
                       FROM product_returns
-                     WHERE source_type = 'order'
+                     WHERE source_type = 'order' AND undone_at IS NULL
                   GROUP BY tenant_id, source_item_id
                ) ret ON ret.tenant_id = oi.tenant_id AND ret.source_item_id = oi.id
               WHERE oi.tenant_id = ? AND o.status IN ('paid','open') AND COALESCE(o.total,0) > 0
@@ -2008,7 +2039,7 @@ class OrderModel extends Model
                        SUM(oi.line_total * {$paidRatio}) AS revenue,
                        SUM(
                            CASE
-                               WHEN oi.price_type = 'wholesale'
+                               WHEN oi.price_type IN ('wholesale','retail_pack')
                                     AND COALESCE(p.units_per_pack, 1) > 1
                                     AND COALESCE(p.pack_unit, '') <> ''
                                     AND p.package_buying_price IS NOT NULL
@@ -2016,8 +2047,17 @@ class OrderModel extends Model
                                ELSE GREATEST(oi.quantity - COALESCE(ret.returned_quantity,0), 0) * COALESCE(p.`{$costCol}`, 0) * {$paidRatio}
                            END
                        ) AS cost,
-                       SUM(CASE WHEN oi.price_type = 'retail' THEN oi.line_total * {$paidRatio} ELSE 0 END)
-                       - SUM(CASE WHEN oi.price_type = 'retail' THEN GREATEST(oi.quantity - COALESCE(ret.returned_quantity,0), 0) * COALESCE(p.`{$costCol}`, 0) * {$paidRatio} ELSE 0 END) AS retail_profit,
+                       SUM(CASE WHEN oi.price_type IN ('retail','retail_pack') THEN oi.line_total * {$paidRatio} ELSE 0 END)
+                       - SUM(CASE WHEN oi.price_type IN ('retail','retail_pack') THEN
+                           CASE
+                               WHEN oi.price_type = 'retail_pack'
+                                    AND COALESCE(p.units_per_pack, 1) > 1
+                                    AND COALESCE(p.pack_unit, '') <> ''
+                                    AND p.package_buying_price IS NOT NULL
+                                   THEN (GREATEST(oi.quantity - COALESCE(ret.returned_quantity,0), 0) / p.units_per_pack) * p.package_buying_price * {$paidRatio}
+                               ELSE GREATEST(oi.quantity - COALESCE(ret.returned_quantity,0), 0) * COALESCE(p.`{$costCol}`, 0) * {$paidRatio}
+                           END
+                         ELSE 0 END) AS retail_profit,
                        SUM(CASE WHEN oi.price_type = 'wholesale' THEN oi.line_total * {$paidRatio} ELSE 0 END)
                        - SUM(CASE WHEN oi.price_type = 'wholesale' THEN
                            CASE
@@ -2041,7 +2081,7 @@ class OrderModel extends Model
              LEFT JOIN (
                     SELECT tenant_id, source_item_id, SUM(returned_quantity) AS returned_quantity
                       FROM product_returns
-                     WHERE source_type = 'order'
+                     WHERE source_type = 'order' AND undone_at IS NULL
                   GROUP BY tenant_id, source_item_id
              ) ret ON ret.tenant_id = oi.tenant_id AND ret.source_item_id = oi.id
                  WHERE oi.tenant_id = ? AND o.status IN ('paid','open') AND COALESCE(o.total,0) > 0

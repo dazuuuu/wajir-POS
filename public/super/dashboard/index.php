@@ -118,6 +118,10 @@ $shop = $__tenant['name'] ?? 'your shop';
 $userName = $_SESSION['username'] ?? 'Admin';
 $hour = (int) date('G');
 $greeting = $hour < 12 ? 'Good morning' : ($hour < 17 ? 'Good afternoon' : 'Good evening');
+$dashCreditEnabled = Modules::enabled('credit_sales', $__tenant);
+$dashInventoryEnabled = Modules::enabled('inventory', $__tenant);
+$dashIsPrimaryOwner = TenantContext::role() === 'tenant_owner'
+    && (int) ($__tenant['owner_user_id'] ?? 0) === (int) TenantContext::userId();
 $chartMax = max(1, max($chartValues));
 $lossBars = array_map(fn($v) => round(max(0, $v * 0.38), 2), $chartValues);
 $limitTarget = max(1, $weekSum['revenue'] + max($weekCogs, $damagedLoss, 1));
@@ -125,48 +129,17 @@ $limitPct = min(100, round(($weekSum['revenue'] / $limitTarget) * 100));
 ob_start();
 $icon = fn(string $n, int $s = 18) => NavIcons::svg($n, $s);
 ?>
-<div class="fin-shell">
-  <div class="fin-rail">
-    <a class="rail-mark" href="<?php echo public_url('super/dashboard/'); ?>" title="Dashboard"><?php echo $icon('chart', 18); ?></a>
-    <a class="rail-pill active" href="<?php echo public_url('super/dashboard/'); ?>" title="Overview"><?php echo $icon('overview'); ?></a>
-    <a class="rail-pill" href="<?php echo public_url('super/shop/'); ?>" title="Shop"><?php echo $icon('shop'); ?></a>
-    <a class="rail-pill" href="<?php echo public_url('super/sales/'); ?>" title="Sales"><?php echo $icon('sales'); ?></a>
-    <a class="rail-pill" href="<?php echo public_url('super/invoices/'); ?>" title="Invoices"><?php echo $icon('invoices'); ?></a>
-    <a class="rail-pill" href="<?php echo public_url('super/payments/'); ?>" title="Payments"><?php echo $icon('payments'); ?></a>
-    <a class="rail-pill" href="<?php echo public_url('super/inventory/'); ?>" title="Inventory"><?php echo $icon('inventory'); ?></a>
-    <a class="rail-pill" href="<?php echo public_url('super/store/'); ?>" title="Store"><?php echo $icon('store'); ?></a>
-    <a class="rail-pill" href="<?php echo public_url('super/expenses/'); ?>" title="Expenses"><?php echo $icon('expenses'); ?></a>
-    <a class="rail-pill" href="<?php echo public_url('super/finances/'); ?>" title="Finances"><?php echo $icon('finances'); ?></a>
-    <a class="rail-pill" href="<?php echo public_url('super/stock/new.php'); ?>" title="Record stock"><?php echo $icon('stock'); ?></a>
-    <a class="rail-pill" href="<?php echo public_url('super/settings/'); ?>" title="Settings"><?php echo $icon('settings'); ?></a>
-    <span class="rail-spacer"></span>
-    <a class="rail-pill" href="<?php echo public_url('auth/logout.php'); ?>" title="Logout"><?php echo $icon('logout'); ?></a>
-  </div>
-
-  <section class="fin-board">
-    <header class="fin-head">
-      <div class="fin-tabs">
-        <a class="tab active" href="<?php echo public_url('super/dashboard/'); ?>">Overview</a>
-        <a class="tab" href="<?php echo public_url('super/sales/'); ?>">Activity</a>
-        <a class="tab" href="<?php echo public_url('super/inventory/'); ?>">Manage</a>
-        <a class="tab" href="<?php echo public_url('super/stock/new.php'); ?>">Program</a>
-        <a class="tab" href="<?php echo public_url('super/settings/'); ?>">Account</a>
-        <a class="tab" href="<?php echo public_url('super/reports/'); ?>">Reports</a>
+<div class="dashboard-home">
+    <div class="fin-greeting d-flex justify-content-between align-items-start gap-3 flex-wrap">
+      <div>
+        <h1><?php echo htmlspecialchars($greeting . ', ' . $userName); ?></h1>
+        <p>Stay on top of sales, stock movement, credit invoices, and team activity.</p>
       </div>
-      <div class="head-actions">
-        <a class="circle-btn" href="<?php echo public_url('super/sales/'); ?>" title="Search sales"><?php echo $icon('search', 16); ?></a>
-        <a class="circle-btn" href="<?php echo public_url('super/inventory/low-stock.php'); ?>" title="Alerts"><?php echo $icon('bell', 16); ?></a>
-        <div class="profile-chip">
-          <span class="avatar"><?php echo strtoupper(substr($userName, 0, 1)); ?></span>
-          <span><strong><?php echo htmlspecialchars($userName); ?></strong><small><?php echo htmlspecialchars($shop); ?></small></span>
-          <?php echo $icon('chevron', 14); ?>
-        </div>
-      </div>
-    </header>
-
-    <div class="fin-greeting">
-      <h1><?php echo htmlspecialchars($greeting . ', ' . $userName); ?></h1>
-      <p>Stay on top of sales, stock movement, credit invoices, and team activity.</p>
+      <?php if ($dashIsPrimaryOwner): ?>
+        <a class="btn btn-outline-primary btn-sm" href="<?php echo public_url('super/updates/'); ?>">
+          <i class="fas fa-cloud-arrow-down me-1"></i>System updates
+        </a>
+      <?php endif; ?>
     </div>
 
     <div class="fin-grid">
@@ -176,18 +149,18 @@ $icon = fn(string $n, int $s = 18) => NavIcons::svg($n, $s);
         <div class="delta good"><?php echo $icon('arrow-up', 12); ?><?php echo $todaySum['count']; ?> sale<?php echo $todaySum['count'] === 1 ? '' : 's'; ?> today</div>
         <div class="balance-actions">
           <a class="dark-action" href="<?php echo public_url('super/shop/'); ?>"><?php echo $icon('transfer', 14); ?> Sell</a>
-          <a class="light-action" href="<?php echo public_url('super/stock/new.php'); ?>"><?php echo $icon('plus', 14); ?> Stock</a>
+          <?php if ($dashInventoryEnabled): ?><a class="light-action" href="<?php echo public_url('super/stock/new.php'); ?>"><?php echo $icon('plus', 14); ?> Stock</a><?php endif; ?>
         </div>
         <div class="wallets">
           <div class="wallet"><span>Today</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($todaySum['revenue'], 0); ?></strong><small>Active</small></div>
-          <div class="wallet"><span>Credit owed</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($dashCreditOwed, 0); ?></strong><small><?php echo count($openTabs); ?> invoice<?php echo count($openTabs) === 1 ? '' : 's'; ?></small></div>
-          <div class="wallet"><span>Low stock</span><strong><?php echo count($lowStock); ?></strong><small><?php echo $lowStock ? 'Review' : 'Clear'; ?></small></div>
+          <?php if ($dashCreditEnabled): ?><div class="wallet"><span>Credit owed</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($dashCreditOwed, 0); ?></strong><small><?php echo count($openTabs); ?> invoice<?php echo count($openTabs) === 1 ? '' : 's'; ?></small></div><?php endif; ?>
+          <?php if ($dashInventoryEnabled): ?><div class="wallet"><span>Low stock</span><strong><?php echo count($lowStock); ?></strong><small><?php echo $lowStock ? 'Review' : 'Clear'; ?></small></div><?php endif; ?>
         </div>
       </section>
 
       <section class="metric-grid">
         <article class="metric hot"><span>Total Earnings</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($todaySum['revenue'], 0); ?></strong><small><?php echo $icon('arrow-up', 11); ?> Today</small></article>
-        <article class="metric"><span>Credit sales owed</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($dashCreditOwed, 0); ?></strong><small><?php echo $icon('invoice-dollar', 12); ?> <?php echo count($openTabs); ?> open</small></article>
+        <?php if ($dashCreditEnabled): ?><article class="metric"><span>Credit sales owed</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($dashCreditOwed, 0); ?></strong><small><?php echo $icon('invoice-dollar', 12); ?> <?php echo count($openTabs); ?> open</small></article><?php endif; ?>
         <article class="metric"><span>Sales Revenue</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($weekSum['revenue'], 0); ?></strong><small><?php echo $icon('arrow-up', 11); ?> This week</small></article>
         <article class="metric"><span>Extra charges today</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($todayExtraCharges, 0); ?></strong><small><?php echo $icon('arrow-up', 11); ?> Pure profit</small></article>
         <article class="metric <?php echo $profitAfterLoss < 0 ? 'danger' : ''; ?>"><span>Net Profit</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($profitAvailable ? $profitAfterLoss : 0, 0); ?></strong><small><?php echo $icon('chart', 12); ?> After losses</small></article>
@@ -276,13 +249,13 @@ $icon = fn(string $n, int $s = 18) => NavIcons::svg($n, $s);
         <div class="limit-row"><span><?php echo htmlspecialchars($currency); ?> <?php echo number_format($weekCogs, 0); ?> spent out of</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($limitTarget, 0); ?></strong></div>
       </section>
 
-      <section class="panel card-panel">
+      <?php if ($dashCreditEnabled): ?><section class="panel card-panel">
         <div class="panel-title-row"><h2>My Cards</h2><a href="<?php echo public_url('super/payments/'); ?>">+ Add new</a></div>
         <div class="card-strip">
           <div class="pay-card dark"><span>Active</span><strong><?php echo htmlspecialchars($shop); ?></strong><small>**** **** <?php echo str_pad((string) TenantContext::tenantId(), 4, '0', STR_PAD_LEFT); ?></small></div>
           <div class="pay-card violet"><span>Active</span><strong><?php echo htmlspecialchars($currency); ?></strong><small>**** **** <?php echo date('md'); ?></small></div>
         </div>
-      </section>
+      </section><?php endif; ?>
 
       <section class="panel activity-panel">
         <div class="panel-title-row">
@@ -312,33 +285,12 @@ $icon = fn(string $n, int $s = 18) => NavIcons::svg($n, $s);
         <?php endif; ?>
       </section>
     </div>
-  </section>
 </div>
 
 <style>
-.t-sidebar,.t-sidebar-toggle,.t-sidebar-overlay{display:none!important;}
-.t-main{margin-left:0!important;width:100%!important;max-width:none!important;padding:0!important;background:#e9e9ea;min-height:100vh;}
-.t-topbar{display:none;}
-.fin-shell{display:grid;grid-template-columns:72px minmax(0,1fr);gap:0;width:100%;max-width:none;min-height:100vh;margin:0;background:#f3f3f4;border:0;border-radius:0;padding:0;box-shadow:none;}
-.fin-rail{background:#fff;border-radius:0;border-right:1px solid #ece8ef;padding:16px 10px;display:flex;flex-direction:column;align-items:center;gap:10px;min-height:100vh;position:sticky;top:0;}
-.rail-mark,.rail-pill{width:42px;height:42px;border-radius:14px;display:flex;align-items:center;justify-content:center;color:#625b69;text-decoration:none;}
-.rail-mark{background:var(--pos-violet);color:#fff;}
-.rail-pill.active{background:#17151d;color:#fff;}
-.rail-pill:hover{background:var(--pos-violet-light);color:var(--pos-violet);}
-.rail-spacer{flex:1;}
+.dashboard-home{width:100%;}
 .nav-svg{display:block;flex-shrink:0;}
-.fin-board{min-width:0;padding:20px 24px 28px;width:100%;}
-.fin-head{height:56px;display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:12px;}
-.fin-tabs{background:#fff;border-radius:20px;padding:7px;display:flex;gap:8px;align-items:center;}
-.tab{border-radius:16px;padding:9px 18px;color:#4f4856;text-decoration:none;font-size:.84rem;}
-.tab.active{background:#17151d;color:#fff;}
-.head-actions{display:flex;gap:10px;align-items:center;}
-.circle-btn{width:40px;height:40px;border:0;border-radius:50%;background:#fff;color:#17151d;display:inline-flex;align-items:center;justify-content:center;text-decoration:none;}
-.profile-chip{height:46px;border-radius:19px;background:#fff;padding:5px 10px 5px 6px;display:flex;align-items:center;gap:9px;min-width:190px;}
-.profile-chip .avatar{width:34px;height:34px;border-radius:50%;background:var(--pos-violet-light);color:var(--pos-violet);display:flex;align-items:center;justify-content:center;font-weight:800;}
-.profile-chip strong{display:block;font-size:.78rem;line-height:1.05;}
-.profile-chip small{display:block;color:#8b8491;font-size:.68rem;max-width:112px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.fin-greeting{margin:8px 0 20px;}
+.fin-greeting{margin:0 0 20px;}
 .fin-greeting h1{font-size:2rem;line-height:1.12;margin:0 0 6px;font-weight:800;letter-spacing:0;}
 .fin-greeting p{color:#686170;margin:0;font-size:.9rem;}
 .fin-grid{display:grid;grid-template-columns:1.05fr 1.05fr 1fr;gap:16px;width:100%;}
@@ -412,8 +364,8 @@ $icon = fn(string $n, int $s = 18) => NavIcons::svg($n, $s);
 .act-icon{width:20px;height:20px;border-radius:50%;display:inline-flex!important;align-items:center;justify-content:center;background:var(--pos-violet-light);color:var(--pos-violet);margin-right:8px;vertical-align:middle;}
 .status{display:flex;align-items:center;gap:5px;}.status i{width:6px;height:6px;border-radius:50%;background:#36a67c;display:inline-block;}.status.pending i{background:#d8bd2d;}.dots{color:#8c8491;letter-spacing:2px;}
 .empty-state{text-align:center;color:#746d7a;padding:40px 0;}
-@media (max-width:1180px){.fin-grid{grid-template-columns:1fr 1fr;}.chart-panel,.activity-panel,.pnl-panel{grid-column:1 / -1;}.pnl-grid{grid-template-columns:repeat(3,minmax(0,1fr));}.activity-panel{grid-row:auto;}.limit-panel,.card-panel{grid-column:auto;}}
-@media (max-width:760px){.t-main{padding:0!important;}.fin-shell{grid-template-columns:1fr;}.fin-rail{display:none;}.fin-board{padding:12px;}.fin-head{height:auto;align-items:flex-start;}.fin-tabs{overflow:auto;max-width:100%;}.head-actions{display:none;}.fin-grid,.metric-grid,.pnl-grid{grid-template-columns:1fr;}.limit-panel,.card-panel,.activity-panel,.chart-panel,.pnl-panel{grid-column:auto;}.activity-head{display:none;}.activity-row{grid-template-columns:22px 1fr;}.activity-row span:nth-child(n+4){display:none;}.wallets{grid-template-columns:1fr;}.pnl-card strong{white-space:normal;}}
+@media (max-width:1450px){.fin-grid{grid-template-columns:1fr 1fr;}.chart-panel,.activity-panel,.pnl-panel{grid-column:1 / -1;}.pnl-grid{grid-template-columns:repeat(3,minmax(0,1fr));}.activity-panel{grid-row:auto;}.limit-panel,.card-panel{grid-column:auto;}}
+@media (max-width:760px){.fin-grid,.metric-grid,.pnl-grid{grid-template-columns:1fr;}.limit-panel,.card-panel,.activity-panel,.chart-panel,.pnl-panel{grid-column:auto;}.activity-head{display:none;}.activity-row{grid-template-columns:22px 1fr;}.activity-row span:nth-child(n+4){display:none;}.wallets{grid-template-columns:1fr;}.pnl-card strong{white-space:normal;}}
 </style>
 <?php
 $content = ob_get_clean();

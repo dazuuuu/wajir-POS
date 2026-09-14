@@ -35,6 +35,14 @@ $customerEmail = '';
 $customerPhone = '';
 $creditDurationDays = 14;
 $heldOrderId = 0;
+$openingDeposit = 0.0;
+$openingDepositMethod = 'cash';
+$canTakeOpeningDeposit = TenantContext::role() === 'tenant_owner' || TenantContext::can(Capabilities::PAYMENTS_PROCESS);
+$depositMethods = PaymentOptions::depositMethods($tenant);
+if (empty($_SESSION['credit_sale_csrf'])) {
+    $_SESSION['credit_sale_csrf'] = bin2hex(random_bytes(24));
+}
+$creditSaleCsrf = $_SESSION['credit_sale_csrf'];
 
 $normalizePriceType = static function ($type): string {
     return in_array($type, ['retail', 'retail_pack', 'wholesale'], true) ? $type : 'retail';
@@ -70,7 +78,9 @@ if ($resumeId > 0) {
     }
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && !hash_equals($creditSaleCsrf, (string) ($_POST['csrf'] ?? ''))) {
+    $error = 'This credit-sale request expired. Reload the page and try again.';
+} elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? 'checkout';
     $cart = json_decode($_POST['cart'] ?? '[]', true);
     $cartJson = $_POST['cart'] ?? '[]';
@@ -79,6 +89,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $customerEmail = trim($_POST['customer_email'] ?? '');
     $customerPhone = trim($_POST['customer_phone'] ?? '');
     $creditDurationDays = max(0, (int) ($_POST['credit_duration_days'] ?? 0));
+    $openingDeposit = $canTakeOpeningDeposit ? max(0, round((float) ($_POST['opening_deposit'] ?? 0), 2)) : 0.0;
+    $openingDepositMethod = isset($depositMethods[$_POST['opening_deposit_method'] ?? ''])
+        ? (string) $_POST['opening_deposit_method']
+        : 'cash';
     $heldOrderId = (int) ($_POST['held_order_id'] ?? 0);
     if (!is_array($cart)) { $cart = []; }
     $items = [];
@@ -117,7 +131,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $additionalCharges = max(0, round((float) ($_POST['additional_charges'] ?? 0), 2));
         $additionalNote = trim((string) ($_POST['additional_charges_note'] ?? ''));
 
-        $res = (new Models\OrderModel($pdo))->open([
+        $orderModel = new Models\OrderModel($pdo);
+        $res = $orderModel->open([
             'table_name'      => $customerName,
             'opened_by'       => TenantContext::userId(),
             'items'           => $items,
@@ -131,8 +146,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'credit_duration_days' => $creditDurationDays,
         ]);
         if ($res['ok']) {
+            $depositNote = '';
+            $depositOk = true;
+            if ($openingDeposit > 0) {
+                $freshOpened = $orderModel->find((int) $res['order_id']);
+                $deposit = min($openingDeposit, max(0, round((float) ($freshOpened['total'] ?? 0), 2)));
+                $payment = $orderModel->markPaid((int) $res['order_id'], [
+                    'method' => 'credit',
+                    'deposit_method' => $openingDepositMethod,
+                    'amount_received' => $deposit,
+                    'amount_tendered' => $openingDepositMethod === 'cash' ? $deposit : null,
+                ], TenantContext::userId());
+                if ($payment['ok']) {
+                    $recordedDeposit = (float) ($payment['amount_paid_now'] ?? $deposit);
+                    $depositNote = ' Opening deposit of KES ' . number_format($recordedDeposit, 2) . ' recorded by ' . ($depositMethods[$openingDepositMethod] ?? $openingDepositMethod) . '.';
+                } else {
+                    $reverted = $orderModel->deleteSale((int) $res['order_id'], TenantContext::userId());
+                    if ($reverted['ok']) {
+                        $depositOk = false;
+                        $error = 'The credit sale was cancelled and its stock restored because the opening deposit could not be recorded. Please try again.';
+                    } else {
+                        $_SESSION['flash']['error'] = 'The credit sale exists, but its opening deposit failed and automatic cancellation also failed. Do not collect it twice; record the payment from this invoice now.';
+                        header('Location: ' . $ordersViewBase . '?id=' . $res['order_id']);
+                        exit;
+                    }
+                }
+            }
+            if ($depositOk) {
             if ($heldOrderId > 0) { $HO->discard($heldOrderId); }
-            $opened = (new Models\OrderModel($pdo))->find((int) $res['order_id']);
+            $opened = $orderModel->find((int) $res['order_id']);
             $mailNote = '';
             if ($opened) {
                 $opened['opened_by_name'] = $_SESSION['username'] ?? '';
@@ -148,20 +190,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'logo' => Branding::tenantLogo($tenant),
                         'payment_credentials' => $tenant['payment_credentials'] ?? '',
                     ];
-                    $msg = build_order_invoice_email($opened, (new Models\OrderModel($pdo))->items((int) $res['order_id']), $shop);
+                    $msg = build_order_invoice_email($opened, $orderModel->items((int) $res['order_id']), $shop);
                     $mailNote = (new MailService())->send($opened['customer_email'], $msg['subject'], $msg['html'], $msg['text'])
                         ? ' Invoice emailed.'
                         : ' Invoice email failed: ' . (MailService::lastError() ?: 'unknown error');
                     if (strpos($mailNote, ' Invoice emailed') === 0) {
-                        (new Models\OrderModel($pdo))->markInvoiceSent((int) $res['order_id']);
+                        $orderModel->markInvoiceSent((int) $res['order_id']);
                     }
                 }
             }
-            $_SESSION['flash']['success'] = 'Credit sale opened - ' . $res['receipt_number'] . '.' . $mailNote;
+            $_SESSION['flash']['success'] = 'Credit sale opened - ' . $res['receipt_number'] . '.' . $depositNote . $mailNote;
             header('Location: ' . $ordersViewBase . '?id=' . $res['order_id']);
             exit;
+            }
         }
-        $error = $res['errors']['_'] ?? ($res['errors']['table_name'] ?? 'Could not open this tab.');
+        if ($error === '') {
+            $error = $res['errors']['_'] ?? ($res['errors']['table_name'] ?? 'Could not open this tab.');
+        }
     }
 }
 
@@ -177,6 +222,7 @@ ob_start();
 <input type="hidden" name="action" id="formAction" value="checkout">
 <input type="hidden" name="cart" id="cartInput" value="">
 <input type="hidden" name="held_order_id" value="<?php echo (int) $heldOrderId; ?>">
+<input type="hidden" name="csrf" value="<?php echo htmlspecialchars($creditSaleCsrf); ?>">
 <input type="hidden" name="customer_id" id="customerIdInput" value="<?php echo (int) $customerId; ?>">
 
 <div class="pos-grid">
@@ -359,8 +405,18 @@ ob_start();
       </div>
     </div>
 
-    <div class="pos-cart" id="cartRows">
-      <div class="text-muted small text-center py-4" id="cartEmpty">Tap a product to add it. Type qty for retail items, retail boxes, and/or wholesale packs.</div>
+    <div class="pos-cart-wrap">
+      <div class="pos-cart-search-wrap mb-2" id="cartSearchWrap" style="display:none;">
+        <div class="pos-cart-search-box">
+          <i class="fas fa-search pos-cart-search-icon"></i>
+          <input type="text" id="cartSearchInput" class="pos-cart-search-input" placeholder="Search products in this sale..." autocomplete="off">
+          <button type="button" id="cartSearchClear" class="pos-cart-search-clear" style="display:none;" title="Clear search"><i class="fas fa-xmark"></i></button>
+        </div>
+        <div id="cartSearchCount" class="small text-muted mt-1" style="display:none;"></div>
+      </div>
+      <div class="pos-cart" id="cartRows">
+        <div class="text-muted small text-center py-4" id="cartEmpty">Tap a product to add it. Type qty for retail items, retail boxes, and/or wholesale packs.</div>
+      </div>
     </div>
 
     <div class="pos-totals">
@@ -380,6 +436,29 @@ ob_start();
       <div class="d-flex justify-content-between pos-total-line"><span>Total</span><span id="totalOut">KES 0</span></div>
     </div>
 
+    <?php if ($canTakeOpeningDeposit): ?>
+    <div class="mt-3 border rounded-3 p-3 bg-light">
+      <div class="fw-semibold small mb-1">Opening credit balance &amp; deposit</div>
+      <div class="d-flex justify-content-between small mb-2"><span>Opening sale</span><strong id="openingCreditOut">KES 0</strong></div>
+      <div class="row g-2">
+        <div class="col-7">
+          <label class="form-label small mb-1">Deposit received <span class="text-muted">(optional)</span></label>
+          <input type="number" step="0.01" min="0" name="opening_deposit" id="openingDepositInput" class="form-control form-control-sm" value="<?php echo $openingDeposit > 0 ? htmlspecialchars((string) $openingDeposit) : ''; ?>" placeholder="0">
+        </div>
+        <div class="col-5">
+          <label class="form-label small mb-1">Mode</label>
+          <select name="opening_deposit_method" class="form-select form-select-sm">
+            <?php foreach ($depositMethods as $methodKey => $methodLabel): ?>
+              <option value="<?php echo htmlspecialchars($methodKey); ?>" <?php echo $openingDepositMethod === $methodKey ? 'selected' : ''; ?>><?php echo htmlspecialchars($methodLabel); ?></option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+      </div>
+      <div class="d-flex justify-content-between small mt-2"><span>Credit remaining</span><strong class="text-danger" id="remainingCreditOut">KES 0</strong></div>
+      <div class="form-text">Leave the deposit empty to record the entire sale as credit. Payment date and time are saved automatically.</div>
+    </div>
+    <?php endif; ?>
+
     <div class="mt-3">
       <label class="form-label small mb-1">Loyal customer credit override</label>
       <input type="number" step="0.01" min="0" name="credit_override_amount" class="form-control form-control-sm" placeholder="Optional higher product limit">
@@ -388,9 +467,9 @@ ob_start();
 
     <div class="pos-actions">
       <button type="submit" class="pos-btn pos-btn-outline" id="holdBtn" disabled>Hold Sale</button>
-      <button type="submit" class="pos-btn pos-btn-primary" id="checkoutBtn" disabled>Place Order</button>
+      <button type="submit" class="pos-btn pos-btn-primary" id="checkoutBtn" disabled>Proceed Credit Sale</button>
     </div>
-    <div class="text-muted small text-center mt-2">Place Order opens an unpaid invoice — settle it later on Payments.</div>
+    <div class="text-muted small text-center mt-2">Proceed records the unpaid balance under Credit Sales.</div>
   </aside>
 </div>
 </form>
@@ -452,6 +531,11 @@ ob_start();
 .customer-suggest-menu button{display:block;width:100%;border:0;background:#fff;text-align:left;padding:.55rem .7rem;font-size:.85rem;}
 .customer-suggest-menu button:hover{background:#f8fafc;}
 .customer-suggest-menu .meta{display:block;color:#64748b;font-size:.75rem;margin-top:1px;}
+.pos-cart-search-box{position:relative;}
+.pos-cart-search-icon{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:#94a3b8;font-size:.8rem;}
+.pos-cart-search-input{width:100%;border:1px solid #e2e8f0;border-radius:9px;padding:8px 32px 8px 32px;font-size:.82rem;background:#f8fafc;}
+.pos-cart-search-input:focus{outline:none;border-color:var(--pos-green);background:#fff;box-shadow:0 0 0 .15rem rgba(22,163,74,.1);}
+.pos-cart-search-clear{position:absolute;right:7px;top:50%;transform:translateY(-50%);border:0;background:transparent;color:#64748b;padding:3px 5px;}
 .pos-cart{max-height:320px;overflow-y:auto;margin:14px 0;}
 .pos-cart-line{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid #f3f4f7;}
 .pos-cart-line img, .pos-cart-line .ph{width:38px;height:38px;border-radius:8px;object-fit:cover;background:#f3f4f7;display:flex;align-items:center;justify-content:center;color:#d7d9df;flex-shrink:0;margin-top:2px;}
@@ -670,14 +754,70 @@ function updateTotals() {
     if (d > sub) d = sub;
     var extra = parseFloat((document.getElementById('extraChargeInput') || {}).value) || 0;
     if (extra < 0) extra = 0;
+    var total = sub - d + extra;
+    var depositInput = document.getElementById('openingDepositInput');
+    var deposit = depositInput ? Math.max(0, parseFloat(depositInput.value) || 0) : 0;
+    if (deposit > total) deposit = total;
     document.getElementById('subtotalOut').textContent = money(sub);
-    document.getElementById('totalOut').textContent = money(sub - d + extra);
+    document.getElementById('totalOut').textContent = money(total);
+    var openingOut = document.getElementById('openingCreditOut');
+    var remainingOut = document.getElementById('remainingCreditOut');
+    if (openingOut) openingOut.textContent = money(total);
+    if (remainingOut) remainingOut.textContent = money(Math.max(0, total - deposit));
+}
+
+var cartSearchQuery = '';
+var cartSearchInput = document.getElementById('cartSearchInput');
+var cartSearchClear = document.getElementById('cartSearchClear');
+var cartSearchCount = document.getElementById('cartSearchCount');
+if (cartSearchInput) {
+    cartSearchInput.addEventListener('input', function () {
+        cartSearchQuery = cartSearchInput.value.toLowerCase().trim();
+        if (cartSearchClear) cartSearchClear.style.display = cartSearchQuery ? 'block' : 'none';
+        render();
+    });
+}
+if (cartSearchClear) {
+    cartSearchClear.addEventListener('click', function () {
+        cartSearchQuery = '';
+        if (cartSearchInput) {
+            cartSearchInput.value = '';
+            cartSearchInput.focus();
+        }
+        cartSearchClear.style.display = 'none';
+        render();
+    });
 }
 
 function render() {
-    var wrap = document.getElementById('cartRows'), ids = Object.keys(cart);
-    wrap.innerHTML = ids.length ? '' : '<div class="text-muted small text-center py-4" id="cartEmpty">Tap a product to add it. Type qty for retail items, retail boxes, and/or wholesale packs.</div>';
-    ids.forEach(function (id) {
+    var wrap = document.getElementById('cartRows');
+    var searchWrap = document.getElementById('cartSearchWrap');
+    var ids = Object.keys(cart).filter(function (id) { return cart[id] && !PC.isEmpty(cart[id]); });
+    var visibleIds = ids;
+    if (cartSearchQuery) {
+        visibleIds = ids.filter(function (id) {
+            var p = PRODUCTS[id];
+            if (!p) return false;
+            var nameMatch = (p.name || '').toLowerCase().indexOf(cartSearchQuery) !== -1;
+            var barcodeMatch = Object.keys(BARCODES).some(function (code) {
+                return BARCODES[code] === id && code.toLowerCase().indexOf(cartSearchQuery) !== -1;
+            });
+            return nameMatch || barcodeMatch;
+        });
+    }
+    if (searchWrap) searchWrap.style.display = ids.length ? 'block' : 'none';
+    if (cartSearchCount) {
+        cartSearchCount.style.display = cartSearchQuery ? 'block' : 'none';
+        cartSearchCount.textContent = 'Showing ' + visibleIds.length + ' of ' + ids.length + ' products';
+    }
+    if (!ids.length) {
+        wrap.innerHTML = '<div class="text-muted small text-center py-4" id="cartEmpty">Tap a product to add it. Type qty for retail items, retail boxes, and/or wholesale packs.</div>';
+    } else if (!visibleIds.length) {
+        wrap.innerHTML = '<div class="text-muted small text-center py-4"><i class="fas fa-magnifying-glass me-1"></i>No product in this sale matches your search.</div>';
+    } else {
+        wrap.innerHTML = '';
+    }
+    visibleIds.forEach(function (id) {
         var p = PRODUCTS[id], c = cart[id];
         if (!p || !c) return;
         var retailMax = Math.max(c.retail || 0, PC.maxRetail(p, c));
@@ -736,6 +876,8 @@ function syncTypedQty(input) {
 document.getElementById('discountInput').addEventListener('input', updateTotals);
 var extraChargeInput = document.getElementById('extraChargeInput');
 if (extraChargeInput) extraChargeInput.addEventListener('input', updateTotals);
+var openingDepositInput = document.getElementById('openingDepositInput');
+if (openingDepositInput) openingDepositInput.addEventListener('input', updateTotals);
 document.getElementById('saleModeTabs').addEventListener('click', function (e) {
     var btn = e.target.closest('[data-sale-mode]');
     if (!btn) return;

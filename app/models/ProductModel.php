@@ -35,8 +35,13 @@ class ProductModel extends Model
         if ($errors) {
             return ['ok' => false, 'id' => null, 'errors' => $errors];
         }
-        $id = $this->insert($this->columns($in));
-        return ['ok' => true, 'id' => $id, 'errors' => []];
+        try {
+            $id = $this->insert($this->columns($in));
+            return ['ok' => true, 'id' => $id, 'errors' => []];
+        } catch (\PDOException $e) {
+            error_log('ProductModel::create failed: ' . $e->getMessage());
+            return ['ok' => false, 'id' => null, 'errors' => ['_' => 'Could not save this product. Please check its details and try again.']];
+        }
     }
 
     public function edit(int $id, array $in): array
@@ -49,8 +54,50 @@ class ProductModel extends Model
         if ($errors) {
             return ['ok' => false, 'errors' => $errors];
         }
-        $this->update($id, $this->columns($in));
-        return ['ok' => true, 'errors' => []];
+        try {
+            $this->update($id, $this->columns($in));
+            return ['ok' => true, 'errors' => []];
+        } catch (\PDOException $e) {
+            error_log('ProductModel::edit failed: ' . $e->getMessage());
+            return ['ok' => false, 'errors' => ['_' => 'Could not save this product. Please check its details and try again.']];
+        }
+    }
+
+    /** Atomically add stock while applying the submitted product/pricing fields. */
+    public function restock(int $id, float $quantityToAdd, array $in): array
+    {
+        $row = $this->find($id);
+        $tid = \TenantContext::tenantId();
+        if (!$row || (int) ($row['tenant_id'] ?? 0) !== (int) $tid) {
+            return ['ok' => false, 'errors' => ['_' => 'Product not found.']];
+        }
+        if ($quantityToAdd < 0) {
+            return ['ok' => false, 'errors' => ['quantity' => 'Enter a valid quantity to add.']];
+        }
+        $this->normalizeInputs($in, false);
+        $errors = $this->validate($in + ['id' => $id]);
+        if ($errors) {
+            return ['ok' => false, 'errors' => $errors];
+        }
+        try {
+            $data = $this->columns($in);
+            unset($data['quantity']);
+            $sets = ['quantity = quantity + ?'];
+            $params = [$quantityToAdd];
+            foreach ($data as $column => $value) {
+                $sets[] = "`{$column}` = ?";
+                $params[] = $value;
+            }
+            $params[] = $id;
+            $params[] = $tid;
+            $this->db->prepare(
+                'UPDATE products SET ' . implode(', ', $sets) . ' WHERE id = ? AND tenant_id = ?'
+            )->execute($params);
+            return ['ok' => true, 'errors' => []];
+        } catch (\PDOException $e) {
+            error_log('ProductModel::restock failed: ' . $e->getMessage());
+            return ['ok' => false, 'errors' => ['_' => 'Could not add this stock. Please try again.']];
+        }
     }
 
     /** Assign a system-generated barcode when the product has none yet. */
@@ -263,6 +310,12 @@ class ProductModel extends Model
             $r['on_offer']        = $eff['on_offer'];
             $r['offer_ends_at']   = $eff['ends_at'];
             $r['wholesale_price'] = (float) ($r['wholesale_price'] ?? $r['selling_price'] ?? 0);
+            if ((float) ($r['retail_pack_price'] ?? 0) <= 0
+                && (float) ($r['units_per_pack'] ?? 1) > 1
+                && trim((string) ($r['pack_unit'] ?? '')) !== ''
+                && (float) $eff['regular_price'] > 0) {
+                $r['retail_pack_price'] = round((float) $eff['regular_price'] * (float) $r['units_per_pack'], 2);
+            }
             $r['is_archived']     = $r['status'] === 'archived';
             $r['colors']          = $r['colors'] ? (json_decode($r['colors'], true) ?: []) : [];
             $r['sizes']           = $r['sizes'] ? (json_decode($r['sizes'], true) ?: []) : [];
@@ -497,6 +550,20 @@ class ProductModel extends Model
             }
         } catch (\PDOException $ignored) {
         }
+        // Categories are optional in the UI and columns() intentionally stores
+        // NULL when none is chosen. Older installations still have the
+        // original NOT NULL definition from migration 020.
+        try {
+            $isNullable = (string) $this->db->query(
+                "SELECT IS_NULLABLE FROM information_schema.COLUMNS
+                  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'products' AND COLUMN_NAME = 'category_id'
+                  LIMIT 1"
+            )->fetchColumn();
+            if (strtoupper($isNullable) === 'NO') {
+                $this->db->exec("ALTER TABLE `products` MODIFY COLUMN `category_id` INT NULL");
+            }
+        } catch (\PDOException $ignored) {
+        }
     }
 
     public function normalizeInputs(array &$in, bool $isNew = true): void
@@ -596,6 +663,9 @@ class ProductModel extends Model
         }
         if (isset($in['pack_price']) && $in['pack_price'] !== '' && (!is_numeric($in['pack_price']) || (float) $in['pack_price'] < 0)) {
             $errors['pack_price'] = 'Enter a valid package price.';
+        }
+        if (isset($in['retail_pack_price']) && $in['retail_pack_price'] !== '' && (!is_numeric($in['retail_pack_price']) || (float) $in['retail_pack_price'] < 0)) {
+            $errors['retail_pack_price'] = 'Enter a valid retail package price.';
         }
         if (isset($in['retail_price']) && $in['retail_price'] !== '' && (!is_numeric($in['retail_price']) || (float) $in['retail_price'] < 0)) {
             $errors['retail_price'] = 'Enter a valid retail price.';

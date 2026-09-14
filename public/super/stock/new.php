@@ -100,8 +100,18 @@ function stock_package_fields(array $row, array $units): array
 }
 
 $error = '';
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $destination = in_array($_POST['destination'] ?? '', ['store', 'shop'], true) ? $_POST['destination'] : 'store';
+if (empty($_SESSION['record_stock_csrf'])) {
+    $_SESSION['record_stock_csrf'] = bin2hex(random_bytes(24));
+}
+$recordStockCsrf = $_SESSION['record_stock_csrf'];
+$defaultDestination = in_array($_GET['destination'] ?? '', ['store', 'shop'], true)
+    ? $_GET['destination']
+    : 'store';
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && !hash_equals($recordStockCsrf, (string) ($_POST['csrf'] ?? ''))) {
+    $error = 'This stock request expired. Reload the page and try again.';
+} elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $destination = in_array($_POST['destination'] ?? '', ['store', 'shop'], true) ? $_POST['destination'] : $defaultDestination;
+    $defaultDestination = $destination;
     $supplierName = trim($_POST['supplier'] ?? '');
     $supplierId = $supplierName !== '' ? (int) $SUP->findOrCreate($supplierName) : 0;
     $rows = $_POST['items'] ?? [];
@@ -213,19 +223,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         if ($destination === 'shop') {
             $savedCount = 0;
-            foreach ($items as $it) {
+            $saveErrors = [];
+            try {
+                $pdo->beginTransaction();
+                foreach ($items as $it) {
                 if (!empty($it['product_id'])) {
                     $curr = $P->find((int) $it['product_id']);
                     if ($curr) {
-                        $newQty = (float) $curr['quantity'] + (float) $it['quantity'];
-                        $P->edit((int) $curr['id'], array_merge($curr, [
-                            'quantity' => $newQty,
+                        $pRes = $P->restock((int) $curr['id'], (float) $it['quantity'], array_merge($curr, [
                             'buying_price' => $it['buying_price'] > 0 ? $it['buying_price'] : ($curr['buying_price'] ?? 0),
                             'package_buying_price' => $it['package_buying_price'] ?: ($curr['package_buying_price'] ?? null),
                             'retail_price' => $it['retail_price'] > 0 ? $it['retail_price'] : ($curr['retail_price'] ?? 0),
                             'wholesale_price' => $it['wholesale_price'] > 0 ? $it['wholesale_price'] : ($curr['wholesale_price'] ?? 0),
+                            'units_per_pack' => (float) ($curr['units_per_pack'] ?? 1) > 1 ? $curr['units_per_pack'] : ($it['units_per_package'] ?: 1),
+                            'pack_unit' => ($curr['pack_unit'] ?? null) ?: $it['package_unit'],
+                            'pack_price' => $it['package_price'] ?: ($curr['pack_price'] ?? null),
+                            'retail_pack_price' => $it['retail_pack_price'] ?: ($curr['retail_pack_price'] ?? null),
                         ]));
-                        $savedCount++;
+                        if ($pRes['ok']) {
+                            $savedCount++;
+                        } else {
+                            $saveErrors[] = $it['name'] . ': ' . implode(' ', $pRes['errors'] ?? ['Could not update product.']);
+                        }
+                    } else {
+                        $saveErrors[] = $it['name'] . ': Existing product was not found.';
                     }
                 } else {
                     $pRes = $P->create([
@@ -253,12 +274,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ]);
                     if ($pRes['ok']) {
                         $savedCount++;
+                    } else {
+                        $saveErrors[] = $it['name'] . ': ' . implode(' ', $pRes['errors'] ?? ['Could not save product.']);
                     }
                 }
+                }
+                if ($saveErrors) {
+                    $pdo->rollBack();
+                    $savedCount = 0;
+                } else {
+                    $pdo->commit();
+                }
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) { $pdo->rollBack(); }
+                error_log('Direct shop stock intake failed: ' . $e->getMessage());
+                $savedCount = 0;
+                $saveErrors[] = 'The stock batch could not be saved. No rows were added.';
             }
-            $_SESSION['flash']['success'] = $savedCount . ' product' . ($savedCount === 1 ? '' : 's') . ' saved directly to Shop (Inventory) and ready to sell.';
-            header('Location: ' . public_url('super/inventory/'));
-            exit;
+            if (!$saveErrors) {
+                $_SESSION['flash']['success'] = $savedCount . ' product' . ($savedCount === 1 ? '' : 's') . ' saved directly to Shop (Inventory) and ready to sell.';
+                header('Location: ' . public_url('super/inventory/'));
+                exit;
+            }
+            $error = 'No stock was added. Could not save: ' . implode(' | ', $saveErrors);
         } else {
             $res = $SP->createMany($items, TenantContext::userId());
             if ($res['ok']) {
@@ -277,6 +315,7 @@ ob_start();
 <?php if ($error): ?><div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
 
 <form method="post" enctype="multipart/form-data" id="stockForm" novalidate>
+  <input type="hidden" name="csrf" value="<?php echo htmlspecialchars($recordStockCsrf); ?>">
   <div class="card border-0 shadow-sm mb-4" style="border-radius:12px;">
     <div class="card-body p-4">
       <h2 class="h5 mb-2">Record Destination</h2>
@@ -284,7 +323,7 @@ ob_start();
       <div class="row g-3">
         <div class="col-12 col-md-6">
           <label class="d-flex align-items-start p-3 border rounded cursor-pointer destination-card h-100" style="cursor:pointer;border-radius:10px;">
-            <input type="radio" name="destination" value="store" class="form-check-input me-3 mt-1 dest-radio" checked id="destStore">
+            <input type="radio" name="destination" value="store" class="form-check-input me-3 mt-1 dest-radio" <?php echo $defaultDestination === 'store' ? 'checked' : ''; ?> id="destStore">
             <div>
               <div class="fw-bold text-dark"><i class="fas fa-box-archive text-primary me-2"></i>Store (Warehouse)</div>
               <div class="small text-muted mt-1">Products land in the Store warehouse awaiting transfer to shop via invoice.</div>
@@ -293,7 +332,7 @@ ob_start();
         </div>
         <div class="col-12 col-md-6">
           <label class="d-flex align-items-start p-3 border rounded cursor-pointer destination-card h-100" style="cursor:pointer;border-radius:10px;">
-            <input type="radio" name="destination" value="shop" class="form-check-input me-3 mt-1 dest-radio" id="destShop">
+            <input type="radio" name="destination" value="shop" class="form-check-input me-3 mt-1 dest-radio" <?php echo $defaultDestination === 'shop' ? 'checked' : ''; ?> id="destShop">
             <div>
               <div class="fw-bold text-dark"><i class="fas fa-store text-success me-2"></i>Shop (Active Inventory)</div>
               <div class="small text-muted mt-1">Products appear directly in shop Inventory, available immediately for cashier counter sales.</div>
@@ -577,6 +616,8 @@ ob_start();
       if (item.retail_price) { row.querySelector('.retailPrice').value = item.retail_price; }
       if (item.wholesale_price) { row.querySelector('.wholesalePrice').value = item.pack_price && item.pack_price > 0 ? item.pack_price : item.wholesale_price; }
       if (item.retail_pack_price) { row.querySelector('.retailPackPrice').value = item.retail_pack_price; }
+      if (item.pack_unit && row.querySelector('.unitSelect')) { row.querySelector('.unitSelect').value = item.pack_unit; }
+      if (item.units_per_pack > 1 && row.querySelector('.unitsPerPackage')) { row.querySelector('.unitsPerPackage').value = item.units_per_pack; }
       row.querySelector('.qtyLabel').textContent = 'Qty to add';
       var bits = [item.category_name || item.subject_name, item.brand_name || item.publisher_name, item.unit].filter(Boolean);
       note.style.display = 'block';

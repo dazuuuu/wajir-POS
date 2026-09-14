@@ -9,6 +9,38 @@ class ReturnModel extends Model
     {
         parent::__construct($db);
         $this->ensureSchema();
+        CustomerModel::ensureTableExists($this->db);
+    }
+
+    /** Load an exact source without relying on potentially duplicated receipt numbers. */
+    public function findSource(string $sourceType, int $sourceId): ?array
+    {
+        $tid = \TenantContext::tenantId();
+        if ($tid === null || $sourceId <= 0 || !in_array($sourceType, ['order', 'sale'], true)) {
+            return null;
+        }
+        if ($sourceType === 'order') {
+            $st = $this->db->prepare(
+                "SELECT 'order' AS source_type, o.id, o.receipt_number, o.table_name AS customer_name,
+                        o.status, o.total, o.created_at, u.username AS staff_name
+                   FROM orders o
+              LEFT JOIN users u ON u.id = o.opened_by
+                  WHERE o.tenant_id = ? AND o.id = ? AND o.status <> 'void'
+                  LIMIT 1"
+            );
+        } else {
+            $st = $this->db->prepare(
+                "SELECT 'sale' AS source_type, s.id, s.receipt_number, s.customer_name,
+                        s.status, s.total, s.created_at, u.username AS staff_name
+                   FROM sales s
+              LEFT JOIN users u ON u.id = s.staff_id
+                  WHERE s.tenant_id = ? AND s.id = ? AND s.status <> 'voided'
+                  LIMIT 1"
+            );
+        }
+        $st->execute([$tid, $sourceId]);
+        $row = $st->fetch();
+        return $row ?: null;
     }
 
     public function findReceipt(string $receipt): ?array
@@ -59,17 +91,23 @@ class ReturnModel extends Model
                    ) AS items_summary
               FROM orders o
          LEFT JOIN users u ON u.id = o.opened_by
+         LEFT JOIN customers c ON c.id = o.customer_id AND c.tenant_id = o.tenant_id
              WHERE o.tenant_id = ? AND o.status <> 'void'
         ";
         $orderParams = [$tid];
         if ($q !== '') {
             $orderSql .= " AND (
-                o.receipt_number LIKE ? OR o.table_name LIKE ?
+                o.receipt_number LIKE ? OR o.table_name LIKE ? OR COALESCE(o.customer_phone, '') LIKE ?
+                OR COALESCE(c.name, '') LIKE ? OR COALESCE(c.company_name, '') LIKE ? OR COALESCE(c.phone, '') LIKE ?
                 OR EXISTS (
                     SELECT 1 FROM order_items oi2
                      WHERE oi2.tenant_id = o.tenant_id AND oi2.order_id = o.id AND oi2.product_name LIKE ?
                 )
             )";
+            $orderParams[] = $like;
+            $orderParams[] = $like;
+            $orderParams[] = $like;
+            $orderParams[] = $like;
             $orderParams[] = $like;
             $orderParams[] = $like;
             $orderParams[] = $like;
@@ -104,21 +142,25 @@ class ReturnModel extends Model
         }
         $saleSql .= " ORDER BY s.id DESC LIMIT " . (int)$limit;
 
+        $orders = [];
+        $sales = [];
         try {
             $st1 = $this->db->prepare($orderSql);
             $st1->execute($orderParams);
             $orders = $st1->fetchAll(\PDO::FETCH_ASSOC) ?: [];
-
+        } catch (\Throwable $e) {
+            error_log('ReturnModel::searchReceipts orders failed: ' . $e->getMessage());
+        }
+        try {
             $st2 = $this->db->prepare($saleSql);
             $st2->execute($saleParams);
             $sales = $st2->fetchAll(\PDO::FETCH_ASSOC) ?: [];
-
-            $combined = array_merge($orders, $sales);
-            usort($combined, fn($a, $b) => strtotime($b['created_at']) <=> strtotime($a['created_at']));
-            return array_slice($combined, 0, $limit);
         } catch (\Throwable $e) {
-            return [];
+            error_log('ReturnModel::searchReceipts sales failed: ' . $e->getMessage());
         }
+        $combined = array_merge($orders, $sales);
+        usort($combined, fn($a, $b) => strtotime($b['created_at']) <=> strtotime($a['created_at']));
+        return array_slice($combined, 0, $limit);
     }
 
     public function receiptItems(string $sourceType, int $sourceId): array
@@ -139,6 +181,7 @@ class ReturnModel extends Model
                  ON r.tenant_id = i.tenant_id
                 AND r.source_type = ?
                 AND r.source_item_id = i.id
+                AND r.undone_at IS NULL
               WHERE i.tenant_id = ? AND i.{$sourceCol} = ?
            GROUP BY i.id
            ORDER BY i.id ASC"
@@ -176,7 +219,11 @@ class ReturnModel extends Model
             $this->db->beginTransaction();
 
             $st = $this->db->prepare(
-                "SELECT i.*, s.receipt_number
+                "SELECT i.*, s.receipt_number,
+                        s.subtotal AS source_subtotal, s.total AS source_total,
+                        s.amount_paid AS source_amount_paid, s.amount_due AS source_amount_due,
+                        s.status AS source_status, s.payment_status AS source_payment_status,
+                        s.cash_amount AS source_cash_amount, s.mpesa_amount AS source_mpesa_amount
                    FROM {$itemTable} i
                    JOIN {$sourceTable} s ON s.id = i.{$sourceCol} AND s.tenant_id = i.tenant_id
                   WHERE i.id = ? AND i.{$sourceCol} = ? AND i.tenant_id = ? AND s.status <> ?
@@ -192,7 +239,7 @@ class ReturnModel extends Model
             $ret = $this->db->prepare(
                 "SELECT COALESCE(SUM(returned_quantity),0)
                    FROM product_returns
-                  WHERE tenant_id = ? AND source_type = ? AND source_item_id = ?"
+                  WHERE tenant_id = ? AND source_type = ? AND source_item_id = ? AND undone_at IS NULL"
             );
             $ret->execute([$tid, $sourceType, $itemId]);
             $alreadyReturned = round((float) $ret->fetchColumn(), 2);
@@ -202,11 +249,23 @@ class ReturnModel extends Model
                 return ['ok' => false, 'error' => 'Only ' . rtrim(rtrim(number_format($remaining, 2), '0'), '.') . ' can still be returned for this product.'];
             }
 
+            $snapshot = json_encode([
+                'item_line_total' => (float) ($item['line_total'] ?? 0),
+                'subtotal' => (float) ($item['source_subtotal'] ?? $item['source_total'] ?? 0),
+                'total' => (float) ($item['source_total'] ?? 0),
+                'amount_paid' => (float) ($item['source_amount_paid'] ?? 0),
+                'amount_due' => (float) ($item['source_amount_due'] ?? 0),
+                'status' => (string) ($item['source_status'] ?? ''),
+                'payment_status' => (string) ($item['source_payment_status'] ?? ''),
+                'cash_amount' => isset($item['source_cash_amount']) ? (float) $item['source_cash_amount'] : null,
+                'mpesa_amount' => isset($item['source_mpesa_amount']) ? (float) $item['source_mpesa_amount'] : null,
+            ]);
             $this->db->prepare(
                 "INSERT INTO product_returns
                     (tenant_id, source_type, source_id, source_item_id, product_id, product_name,
-                     receipt_number, returned_quantity, used_quantity, restocked_quantity, reason, note, processed_by, migrated_at, migrated_by)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,NOW(),?)"
+                     receipt_number, returned_quantity, used_quantity, restocked_quantity, reason, note, processed_by,
+                     migrated_at, migrated_by, financial_snapshot)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,NOW(),?,?)"
             )->execute([
                 $tid,
                 $sourceType,
@@ -222,6 +281,7 @@ class ReturnModel extends Model
                 $note !== '' ? $note : null,
                 $staffId,
                 $staffId,
+                $snapshot,
             ]);
 
             if ($restocked > 0 && !empty($item['product_id'])) {
@@ -270,6 +330,152 @@ class ReturnModel extends Model
         return $count
             ? ['ok' => true, 'count' => $count, 'error' => null]
             : ['ok' => false, 'error' => 'Every product on this receipt has already been returned.'];
+    }
+
+    /**
+     * Reverse the latest active return for a receipt. LIFO ordering preserves
+     * the exact financial snapshot captured immediately before each return.
+     */
+    public function undo(int $returnId, int $staffId): array
+    {
+        $tid = \TenantContext::tenantId();
+        if ($tid === null || $returnId <= 0) {
+            return ['ok' => false, 'error' => 'Return record not found.'];
+        }
+        try {
+            $this->db->beginTransaction();
+            $st = $this->db->prepare('SELECT * FROM product_returns WHERE id = ? AND tenant_id = ? FOR UPDATE');
+            $st->execute([$returnId, $tid]);
+            $return = $st->fetch();
+            if (!$return || !empty($return['undone_at'])) {
+                $this->db->rollBack();
+                return ['ok' => false, 'error' => 'This return is missing or has already been undone.'];
+            }
+            $latest = $this->db->prepare(
+                'SELECT MAX(id) FROM product_returns
+                  WHERE tenant_id = ? AND source_type = ? AND source_id = ? AND undone_at IS NULL'
+            );
+            $latest->execute([$tid, $return['source_type'], $return['source_id']]);
+            if ((int) $latest->fetchColumn() !== $returnId) {
+                $this->db->rollBack();
+                return ['ok' => false, 'error' => 'Undo newer returns from this receipt first.'];
+            }
+
+            $isOrder = $return['source_type'] === 'order';
+            $sourceTable = $isOrder ? 'orders' : 'sales';
+            $itemTable = $isOrder ? 'order_items' : 'sale_items';
+            $sourceCol = $isOrder ? 'order_id' : 'sale_id';
+            $sourceSt = $this->db->prepare("SELECT * FROM {$sourceTable} WHERE id = ? AND tenant_id = ? FOR UPDATE");
+            $sourceSt->execute([(int) $return['source_id'], $tid]);
+            $source = $sourceSt->fetch();
+            $itemSt = $this->db->prepare("SELECT * FROM {$itemTable} WHERE id = ? AND {$sourceCol} = ? AND tenant_id = ? FOR UPDATE");
+            $itemSt->execute([(int) $return['source_item_id'], (int) $return['source_id'], $tid]);
+            $item = $itemSt->fetch();
+            if (!$source || !$item) {
+                $this->db->rollBack();
+                return ['ok' => false, 'error' => 'The original receipt or product line no longer exists.'];
+            }
+
+            $restocked = max(0, (float) $return['restocked_quantity']);
+            $used = max(0, (float) $return['used_quantity']);
+            if (!empty($return['migrated_at']) && !empty($return['product_id'])) {
+                $productSt = $this->db->prepare('SELECT quantity, COALESCE(faulty_quantity,0) AS faulty_quantity FROM products WHERE id = ? AND tenant_id = ? FOR UPDATE');
+                $productSt->execute([(int) $return['product_id'], $tid]);
+                $product = $productSt->fetch();
+                if (!$product) {
+                    $this->db->rollBack();
+                    return ['ok' => false, 'error' => 'The inventory product no longer exists.'];
+                }
+                if ((float) $product['quantity'] + 0.0001 < $restocked) {
+                    $this->db->rollBack();
+                    return ['ok' => false, 'error' => 'The returned stock has already been sold; there is not enough quantity to undo this return.'];
+                }
+                if ((float) $product['faulty_quantity'] + 0.0001 < $used) {
+                    $this->db->rollBack();
+                    return ['ok' => false, 'error' => 'The faulty quantity has already changed; this return cannot be undone safely.'];
+                }
+                $this->db->prepare(
+                    'UPDATE products
+                        SET quantity = quantity - ?, faulty_quantity = GREATEST(COALESCE(faulty_quantity,0) - ?, 0)
+                      WHERE id = ? AND tenant_id = ?'
+                )->execute([$restocked, $used, (int) $return['product_id'], $tid]);
+            }
+
+            $refundValue = round((float) $return['returned_quantity'] * (float) $item['unit_price'], 2);
+            $snapshot = json_decode((string) ($return['financial_snapshot'] ?? ''), true);
+            $lineTotal = is_array($snapshot) && isset($snapshot['item_line_total'])
+                ? (float) $snapshot['item_line_total']
+                : min((float) $item['quantity'] * (float) $item['unit_price'], (float) $item['line_total'] + $refundValue);
+            $this->db->prepare("UPDATE {$itemTable} SET line_total = ? WHERE id = ? AND tenant_id = ?")
+                ->execute([$lineTotal, (int) $return['source_item_id'], $tid]);
+
+            $this->restoreFinancialReturn($return['source_type'], $source, $snapshot, $refundValue, $tid);
+            $this->db->prepare(
+                'UPDATE product_returns SET undone_at = NOW(), undone_by = ? WHERE id = ? AND tenant_id = ?'
+            )->execute([$staffId, $returnId, $tid]);
+            $this->db->commit();
+
+            if ($isOrder && !empty($source['customer_id'])) {
+                try {
+                    (new CustomerModel($this->db))->refreshCreditBalance((int) $source['customer_id']);
+                } catch (\Throwable $ignored) {
+                }
+            }
+            return ['ok' => true, 'error' => null];
+        } catch (\Throwable $e) {
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            error_log('ReturnModel::undo failed: ' . $e->getMessage());
+            return ['ok' => false, 'error' => 'Could not safely undo this return.'];
+        }
+    }
+
+    private function restoreFinancialReturn(string $sourceType, array $source, $snapshot, float $refundValue, int $tid): void
+    {
+        $hasSnapshot = is_array($snapshot) && isset($snapshot['total'], $snapshot['subtotal']);
+        $subtotal = $hasSnapshot ? (float) $snapshot['subtotal'] : (float) $source['subtotal'] + $refundValue;
+        $total = $hasSnapshot ? (float) $snapshot['total'] : (float) $source['total'] + $refundValue;
+        // Keep repayments recorded after the return instead of overwriting
+        // them with the older snapshot.
+        $snapshotPaid = $hasSnapshot ? (float) $snapshot['amount_paid'] : 0.0;
+        $paid = $hasSnapshot
+            ? min($total, max($snapshotPaid, (float) $source['amount_paid']))
+            : (float) $source['amount_paid'];
+        $due = max(0, $total - $paid);
+
+        if ($sourceType === 'order') {
+            if (!$hasSnapshot) {
+                $pay = $this->db->prepare('SELECT COALESCE(SUM(amount),0) FROM order_payments WHERE tenant_id = ? AND order_id = ?');
+                $pay->execute([$tid, (int) $source['id']]);
+                $paid = min($total, (float) $pay->fetchColumn());
+                $due = max(0, $total - $paid);
+            }
+            $hasLaterPayment = $hasSnapshot && $paid > $snapshotPaid + 0.0001;
+            $status = $hasSnapshot && !$hasLaterPayment ? (string) $snapshot['status'] : ($due <= 0.0001 ? 'paid' : 'open');
+            $paymentStatus = $hasSnapshot && !$hasLaterPayment ? (string) $snapshot['payment_status'] : ($due <= 0.0001 ? 'paid' : ($paid > 0 ? 'part_paid' : 'credit'));
+            $this->db->prepare(
+                'UPDATE orders SET subtotal = ?, total = ?, amount_paid = ?, amount_due = ?, status = ?, payment_status = ?
+                  WHERE id = ? AND tenant_id = ?'
+            )->execute([$subtotal, $total, $paid, $due, $status, $paymentStatus, (int) $source['id'], $tid]);
+            return;
+        }
+
+        if (!$hasSnapshot && ($source['payment_method'] ?? '') !== 'credit') {
+            $paid = $total;
+            $due = 0;
+        }
+        $hasLaterPayment = $hasSnapshot && $paid > $snapshotPaid + 0.0001;
+        $status = $hasSnapshot ? (string) $snapshot['status'] : 'completed';
+        $paymentStatus = $hasSnapshot && !$hasLaterPayment ? (string) $snapshot['payment_status'] : ($due <= 0.0001 ? 'paid' : ($paid > 0 ? 'part_paid' : 'credit'));
+        $cash = $hasSnapshot ? ($snapshot['cash_amount'] ?? null) : ($source['cash_amount'] ?? null);
+        $mpesa = $hasSnapshot ? ($snapshot['mpesa_amount'] ?? null) : ($source['mpesa_amount'] ?? null);
+        $this->db->prepare(
+            'UPDATE sales
+                SET subtotal = ?, total = ?, amount_paid = ?, amount_due = ?, status = ?, payment_status = ?,
+                    cash_amount = ?, mpesa_amount = ?
+              WHERE id = ? AND tenant_id = ?'
+        )->execute([$subtotal, $total, $paid, $due, $status, $paymentStatus, $cash, $mpesa, (int) $source['id'], $tid]);
     }
 
     private function applyFinancialReturn(string $sourceType, int $sourceId, int $itemId, float $returned, float $unitPrice, int $tid): void
@@ -329,18 +535,26 @@ class ReturnModel extends Model
         )->execute([$subtotal, $total, $paid, $due, $paymentStatus, $cash, $mpesa, $status, $sourceId, $tid]);
     }
 
-    public function recent(int $limit = 100): array
+    public function recent(int $limit = 100, string $query = ''): array
     {
         $tid = \TenantContext::tenantId();
-        $st = $this->db->prepare(
-            "SELECT r.*, u.username AS processed_by_name
+        $query = trim($query);
+        $sql = "SELECT r.*, u.username AS processed_by_name
                FROM product_returns r
           LEFT JOIN users u ON u.id = r.processed_by
-              WHERE r.tenant_id = ?
+              WHERE r.tenant_id = ? AND r.undone_at IS NULL";
+        $params = [$tid];
+        if ($query !== '') {
+            $sql .= " AND (r.receipt_number LIKE ? OR r.product_name LIKE ? OR COALESCE(r.reason,'') LIKE ?
+                           OR COALESCE(r.note,'') LIKE ? OR COALESCE(u.username,'') LIKE ?)";
+            $like = '%' . $query . '%';
+            $params = array_merge($params, [$like, $like, $like, $like, $like]);
+        }
+        $sql .= "
            ORDER BY r.created_at DESC, r.id DESC
-              LIMIT " . (int) $limit
-        );
-        $st->execute([$tid]);
+              LIMIT " . max(1, min(500, $limit));
+        $st = $this->db->prepare($sql);
+        $st->execute($params);
         return $st->fetchAll();
     }
 
@@ -352,7 +566,7 @@ class ReturnModel extends Model
                FROM product_returns r
           LEFT JOIN products p ON p.id = r.product_id AND p.tenant_id = r.tenant_id
           LEFT JOIN users u ON u.id = r.processed_by
-              WHERE r.tenant_id = ? AND r.migrated_at IS NULL
+              WHERE r.tenant_id = ? AND r.migrated_at IS NULL AND r.undone_at IS NULL
            ORDER BY r.created_at ASC, r.id ASC"
         );
         $st->execute([$tid]);
@@ -372,6 +586,10 @@ class ReturnModel extends Model
             if (!$row) {
                 $this->db->rollBack();
                 return ['ok' => false, 'error' => 'Return not found.'];
+            }
+            if (!empty($row['undone_at'])) {
+                $this->db->rollBack();
+                return ['ok' => false, 'error' => 'This return has been undone.'];
             }
             if (!empty($row['migrated_at'])) {
                 $this->db->rollBack();
@@ -415,7 +633,7 @@ class ReturnModel extends Model
         $st = $this->db->prepare(
             "SELECT source_item_id, SUM(returned_quantity) AS returned_quantity, SUM(used_quantity) AS used_quantity
                FROM product_returns
-              WHERE tenant_id = ? AND source_type = ? AND source_item_id IN ($in)
+              WHERE tenant_id = ? AND source_type = ? AND undone_at IS NULL AND source_item_id IN ($in)
            GROUP BY source_item_id"
         );
         $st->execute(array_merge([$tid, $sourceType], $itemIds));
@@ -431,8 +649,14 @@ class ReturnModel extends Model
 
     private function ensureSchema(): void
     {
+        self::ensureTableExists($this->db);
+    }
+
+    /** Reporting models also join returns before the Returns page is opened. */
+    public static function ensureTableExists(\PDO $db): void
+    {
         try {
-            $this->db->exec(
+            $db->exec(
                 "CREATE TABLE IF NOT EXISTS product_returns (
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     tenant_id INT NOT NULL,
@@ -450,6 +674,9 @@ class ReturnModel extends Model
                     processed_by INT NULL,
                     migrated_at DATETIME NULL,
                     migrated_by INT NULL,
+                    financial_snapshot JSON NULL,
+                    undone_at DATETIME NULL,
+                    undone_by INT NULL,
                     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     KEY idx_returns_source (tenant_id, source_type, source_id),
                     KEY idx_returns_item (tenant_id, source_type, source_item_id),
@@ -457,17 +684,21 @@ class ReturnModel extends Model
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
             );
         } catch (\PDOException $ignored) {}
-        $this->ensureColumn('product_returns', 'migrated_at', "ALTER TABLE product_returns ADD COLUMN migrated_at DATETIME NULL AFTER processed_by");
-        $this->ensureColumn('product_returns', 'migrated_by', "ALTER TABLE product_returns ADD COLUMN migrated_by INT NULL AFTER migrated_at");
+        self::ensureColumnExists($db, 'product_returns', 'migrated_at', 'ALTER TABLE product_returns ADD COLUMN migrated_at DATETIME NULL AFTER processed_by');
+        self::ensureColumnExists($db, 'product_returns', 'migrated_by', 'ALTER TABLE product_returns ADD COLUMN migrated_by INT NULL AFTER migrated_at');
+        self::ensureColumnExists($db, 'product_returns', 'financial_snapshot', 'ALTER TABLE product_returns ADD COLUMN financial_snapshot JSON NULL AFTER migrated_by');
+        self::ensureColumnExists($db, 'product_returns', 'undone_at', 'ALTER TABLE product_returns ADD COLUMN undone_at DATETIME NULL AFTER financial_snapshot');
+        self::ensureColumnExists($db, 'product_returns', 'undone_by', 'ALTER TABLE product_returns ADD COLUMN undone_by INT NULL AFTER undone_at');
+        self::ensureColumnExists($db, 'products', 'faulty_quantity', 'ALTER TABLE products ADD COLUMN faulty_quantity DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER quantity');
     }
 
-    private function ensureColumn(string $table, string $column, string $sql): void
+    private static function ensureColumnExists(\PDO $db, string $table, string $column, string $sql): void
     {
         try {
-            $st = $this->db->prepare("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?");
+            $st = $db->prepare("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?");
             $st->execute([$table, $column]);
             if ((int) $st->fetchColumn() === 0) {
-                $this->db->exec($sql);
+                $db->exec($sql);
             }
         } catch (\PDOException $ignored) {}
     }

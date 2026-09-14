@@ -50,7 +50,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'loyalty_points_per_kes'  => max(0, round((float) ($_POST['loyalty_points_per_kes'] ?? 1), 2)),
         'loyalty_kes_per_point'   => max(0, round((float) ($_POST['loyalty_kes_per_point'] ?? 0.01), 4)),
         'low_stock_alert_enabled' => !empty($_POST['low_stock_alert_enabled']) ? 1 : 0,
-        'product_commission_enabled' => !empty($_POST['product_commission_enabled']) ? 1 : 0,
     ];
 
     if (!empty($_FILES['logo']['tmp_name']) && is_uploaded_file($_FILES['logo']['tmp_name'])) {
@@ -67,7 +66,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         $tenantModel->updateSettings($tenantId, $data);
         if (empty($_SESSION['flash']['error'])) {
-            $_SESSION['flash']['success'] = 'Settings updated.';
+            try {
+                Modules::save($pdo, (int) $tenantId, (array) ($_POST['modules'] ?? []));
+                $_SESSION['flash']['success'] = 'Settings and business features updated.';
+            } catch (\Throwable $e) {
+                error_log('Settings module update failed: ' . $e->getMessage());
+                $_SESSION['flash']['error'] = 'Business details were saved, but feature settings could not be updated.';
+            }
         }
     }
     header('Location: ' . public_url('super/settings/'));
@@ -92,6 +97,9 @@ function save_tenant_logo(array $file, int $tenantId): array
 }
 
 $__tenant = $tenantModel->find($tenantId);
+$moduleDefinitions = Modules::definitions();
+$rawModules = $__tenant['enabled_modules'] ?? null;
+$selectedModules = Modules::selection($rawModules);
 $page_title = 'Settings';
 
 ob_start();
@@ -212,11 +220,25 @@ ob_start();
                    <?php echo !isset($__tenant['low_stock_alert_enabled']) || !empty($__tenant['low_stock_alert_enabled']) ? 'checked' : ''; ?>>
             <label class="form-check-label" for="lowStock">Enable low stock alerts</label>
           </div>
-          <div class="mb-3 form-check border rounded p-3 ps-5 bg-light">
-            <input class="form-check-input" type="checkbox" name="product_commission_enabled" value="1" id="productCommission"
-                   <?php echo !empty($__tenant['product_commission_enabled']) ? 'checked' : ''; ?>>
-            <label class="form-check-label fw-semibold" for="productCommission">Allow inventory sales with staff commission</label>
-            <div class="form-text">At POS, staff may raise a product's selling price but can never go below the calculated/current price. The extra amount is recorded as their commission.</div>
+          <hr class="my-4">
+          <div class="mb-4">
+            <h3 class="h6 fw-bold mb-1">Business features</h3>
+            <p class="text-muted small mb-3">All features start enabled. Turn off modules this business does not use. Staff permissions still control what each staff member can access.</p>
+            <div class="row g-2">
+              <?php foreach ($moduleDefinitions as $moduleKey => $module): ?>
+                <div class="col-12 col-md-6">
+                  <div class="form-check border rounded-3 p-3 ps-5 h-100 bg-light">
+                    <input class="form-check-input" type="checkbox" name="modules[]" value="<?php echo htmlspecialchars($moduleKey); ?>"
+                           id="module_<?php echo htmlspecialchars($moduleKey); ?>"
+                           <?php echo in_array($moduleKey, $selectedModules, true) ? 'checked' : ''; ?>>
+                    <label class="form-check-label fw-semibold" for="module_<?php echo htmlspecialchars($moduleKey); ?>">
+                      <?php echo htmlspecialchars($module['label']); ?>
+                    </label>
+                    <div class="form-text"><?php echo htmlspecialchars($module['description']); ?></div>
+                  </div>
+                </div>
+              <?php endforeach; ?>
+            </div>
           </div>
           <div class="mb-4">
             <label class="form-label fw-semibold">Logo</label>

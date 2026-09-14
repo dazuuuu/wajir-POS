@@ -40,3 +40,4 @@ if (session_status() === PHP_SESSION_NONE) {
 
 // Rehydrate the current tenant/user/capabilities for this request.
 TenantContext::boot();
+Modules::enforceRequest();

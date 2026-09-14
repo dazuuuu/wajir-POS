@@ -83,8 +83,18 @@ function single_product_package_fields(array $row, array $units): array
 }
 
 $error = '';
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $destination = in_array($_POST['destination'] ?? '', ['store', 'shop'], true) ? $_POST['destination'] : 'store';
+if (empty($_SESSION['record_single_stock_csrf'])) {
+    $_SESSION['record_single_stock_csrf'] = bin2hex(random_bytes(24));
+}
+$recordSingleStockCsrf = $_SESSION['record_single_stock_csrf'];
+$defaultDestination = in_array($_GET['destination'] ?? '', ['store', 'shop'], true)
+    ? $_GET['destination']
+    : 'store';
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && !hash_equals($recordSingleStockCsrf, (string) ($_POST['csrf'] ?? ''))) {
+    $error = 'This stock request expired. Reload the page and try again.';
+} elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $destination = in_array($_POST['destination'] ?? '', ['store', 'shop'], true) ? $_POST['destination'] : $defaultDestination;
+    $defaultDestination = $destination;
     $name = trim($_POST['name'] ?? '');
     $pkg = single_product_package_fields($_POST, $units);
     $packageQty = max(0, (float) ($_POST['package_quantity'] ?? 0));
@@ -133,16 +143,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if ($destination === 'shop') {
                 if ($existing) {
-                    $newQty = (float) $existing['quantity'] + $qty;
-                    $P->edit((int) $existing['id'], array_merge($existing, [
-                        'quantity' => $newQty,
+                    $saveRes = $P->restock((int) $existing['id'], $qty, array_merge($existing, [
                         'buying_price' => $unitBuying > 0 ? $unitBuying : ($existing['buying_price'] ?? 0),
                         'package_buying_price' => $buyingPrice > 0 ? $buyingPrice : ($existing['package_buying_price'] ?? null),
                         'retail_price' => $sellingPrice > 0 ? $sellingPrice : ($existing['retail_price'] ?? 0),
                         'wholesale_price' => $unitWholesale > 0 ? $unitWholesale : ($existing['wholesale_price'] ?? 0),
+                        'units_per_pack' => (float) ($existing['units_per_pack'] ?? 1) > 1 ? $existing['units_per_pack'] : $effectiveInside,
+                        'pack_unit' => ($existing['pack_unit'] ?? null) ?: $receiveUnit,
+                        'pack_price' => $wholesalePrice > 0 ? $wholesalePrice : ($existing['pack_price'] ?? null),
+                        'retail_pack_price' => $retailPackPrice > 0 ? $retailPackPrice : ($existing['retail_pack_price'] ?? null),
                     ]));
                 } else {
-                    $P->create([
+                    $saveRes = $P->create([
                         'name' => $name,
                         'category_id' => !empty($_POST['category']) ? (int) $C->findOrCreate($_POST['category'], 'product') : null,
                         'brand_id' => !empty($_POST['brand']) ? (int) $BA->findOrCreate('brand', $_POST['brand']) : null,
@@ -166,9 +178,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'description' => $lineNotes ?: null,
                     ]);
                 }
-                $_SESSION['flash']['success'] = 'Product "' . htmlspecialchars($name) . '" saved directly to Shop (Inventory) and ready to sell.';
-                header('Location: ' . public_url('super/inventory/'));
-                exit;
+                if ($saveRes['ok']) {
+                    $_SESSION['flash']['success'] = 'Product "' . htmlspecialchars($name) . '" saved directly to Shop (Inventory) and ready to sell.';
+                    header('Location: ' . public_url('super/inventory/'));
+                    exit;
+                }
+                $error = implode(' ', array_values($saveRes['errors'] ?? ['Could not save this product.']));
             } else {
                 if ($existing) {
                     $items = [[
@@ -247,13 +262,14 @@ ob_start();
 </div>
 
 <form method="post" enctype="multipart/form-data" class="card border-0 shadow-sm" style="border-radius:12px;" novalidate>
+  <input type="hidden" name="csrf" value="<?php echo htmlspecialchars($recordSingleStockCsrf); ?>">
   <div class="card-body p-4">
     <div class="mb-4">
       <label class="form-label fw-semibold">Destination</label>
       <div class="row g-3">
         <div class="col-12 col-md-6">
           <label class="d-flex align-items-start p-3 border rounded cursor-pointer h-100" style="cursor:pointer;border-radius:10px;">
-            <input type="radio" name="destination" value="store" class="form-check-input me-3 mt-1 dest-radio" checked id="destStore">
+            <input type="radio" name="destination" value="store" class="form-check-input me-3 mt-1 dest-radio" <?php echo $defaultDestination === 'store' ? 'checked' : ''; ?> id="destStore">
             <div>
               <div class="fw-bold text-dark"><i class="fas fa-box-archive text-primary me-2"></i>Store (Warehouse)</div>
               <div class="small text-muted mt-1">Product lands in the Store warehouse awaiting transfer to shop via invoice.</div>
@@ -262,7 +278,7 @@ ob_start();
         </div>
         <div class="col-12 col-md-6">
           <label class="d-flex align-items-start p-3 border rounded cursor-pointer h-100" style="cursor:pointer;border-radius:10px;">
-            <input type="radio" name="destination" value="shop" class="form-check-input me-3 mt-1 dest-radio" id="destShop">
+            <input type="radio" name="destination" value="shop" class="form-check-input me-3 mt-1 dest-radio" <?php echo $defaultDestination === 'shop' ? 'checked' : ''; ?> id="destShop">
             <div>
               <div class="fw-bold text-dark"><i class="fas fa-store text-success me-2"></i>Shop (Active Inventory)</div>
               <div class="small text-muted mt-1">Product appears directly in shop Inventory, available immediately for cashier counter sales.</div>
@@ -582,6 +598,8 @@ ob_start();
     if (item.buying_price) document.getElementById('buyingPrice').value = item.buying_price;
     if (item.pack_price && document.getElementById('wholesalePrice')) document.getElementById('wholesalePrice').value = item.pack_price;
     if (item.retail_pack_price && document.getElementById('retailPackPrice')) document.getElementById('retailPackPrice').value = item.retail_pack_price;
+    if (item.pack_unit && document.getElementById('unitSelect')) document.getElementById('unitSelect').value = item.pack_unit;
+    if (item.units_per_pack > 1 && document.getElementById('unitsPerPackage')) document.getElementById('unitsPerPackage').value = item.units_per_pack;
     var bits = [item.category_name || item.subject_name, item.brand_name || item.publisher_name, item.unit].filter(Boolean);
     note.style.display = 'block';
     note.innerHTML = '<i class="fas fa-circle-check me-1"></i>Already in stock' +

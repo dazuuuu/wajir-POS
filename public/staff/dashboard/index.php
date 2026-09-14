@@ -48,6 +48,9 @@ $OR = new Models\OrderModel($pdo);
 $tenantRow = (new Models\TenantModel($pdo))->find(TenantContext::tenantId());
 (new Models\TenantModel($pdo))->ensureShopSchema();
 $tenantRow = (new Models\TenantModel($pdo))->find(TenantContext::tenantId()) ?: $tenantRow;
+$creditSalesEnabled = Modules::enabled('credit_sales', $tenantRow);
+$inventoryEnabled = Modules::enabled('inventory', $tenantRow);
+$documentsEnabled = Modules::enabled('documents', $tenantRow);
 $vatRate = (float) ($tenantRow['vat_rate'] ?? 0);
 $vatInclusive = (int) ($tenantRow['vat_inclusive'] ?? 1) === 1;
 $products   = $P->sellable();
@@ -238,13 +241,15 @@ ob_start();
       <span>Held Sales</span>
       <span class="badge bg-warning text-dark rounded-pill" id="heldSalesBadge"><?php echo $heldCount; ?></span>
     </button>
-    <a class="btn btn-sm btn-outline-secondary" href="<?php echo $ordersBase; ?>"><i class="fas fa-file-invoice-dollar me-1"></i>Credit sales</a>
-    <a class="btn btn-sm btn-outline-secondary" href="<?php echo public_url('staff/orders/held.php'); ?>"><i class="fas fa-list me-1"></i>All held list</a>
+    <?php if ($creditSalesEnabled): ?>
+      <a class="btn btn-sm btn-outline-secondary" href="<?php echo $ordersBase; ?>"><i class="fas fa-file-invoice-dollar me-1"></i>Credit sales</a>
+      <a class="btn btn-sm btn-outline-secondary" href="<?php echo public_url('staff/orders/held.php'); ?>"><i class="fas fa-list me-1"></i>All held list</a>
+    <?php endif; ?>
     <?php if ($isSuperShop): ?>
-      <a class="btn btn-sm btn-outline-primary" href="<?php echo $bulkUrl; ?>"><i class="fas fa-boxes-stacked me-1"></i>Bulk sale</a>
-      <a class="btn btn-sm btn-outline-secondary" href="<?php echo $documentsUrl; ?>"><i class="fas fa-file-lines me-1"></i>Documents</a>
-      <a class="btn btn-sm btn-outline-secondary" href="<?php echo public_url('super/inventory/'); ?>"><i class="fas fa-warehouse me-1"></i>Inventory</a>
-      <?php if (TenantContext::can(Capabilities::STOCK_ENTER)): ?>
+      <?php if ($creditSalesEnabled): ?><a class="btn btn-sm btn-outline-primary" href="<?php echo $bulkUrl; ?>"><i class="fas fa-boxes-stacked me-1"></i>Bulk sale</a><?php endif; ?>
+      <?php if ($documentsEnabled): ?><a class="btn btn-sm btn-outline-secondary" href="<?php echo $documentsUrl; ?>"><i class="fas fa-file-lines me-1"></i>Documents</a><?php endif; ?>
+      <?php if ($inventoryEnabled): ?><a class="btn btn-sm btn-outline-secondary" href="<?php echo public_url('super/inventory/'); ?>"><i class="fas fa-warehouse me-1"></i>Inventory</a><?php endif; ?>
+      <?php if ($inventoryEnabled && TenantContext::can(Capabilities::STOCK_ENTER)): ?>
         <a class="btn btn-sm btn-outline-secondary" href="<?php echo public_url('super/stationery/new.php'); ?>"><i class="fas fa-box-open me-1"></i>Record product</a>
       <?php endif; ?>
     <?php endif; ?>
