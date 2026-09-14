@@ -5,7 +5,9 @@ PageGuard::primaryOwner();
 
 $pdo = Database::pdo();
 $tenantId = (int) TenantContext::tenantId();
-$tenant = (new Models\TenantModel($pdo))->find($tenantId);
+$tenantModel = new Models\TenantModel($pdo);
+$tenantModel->ensureShopSchema();
+$tenant = $tenantModel->find($tenantId);
 
 if (empty($_SESSION['updates_csrf'])) {
     $_SESSION['updates_csrf'] = bin2hex(random_bytes(24));

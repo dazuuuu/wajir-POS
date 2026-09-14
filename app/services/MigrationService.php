@@ -92,6 +92,13 @@ class MigrationService
                         ];
                     }
                 }
+                if (!$this->validateMigration($this->version($name))) {
+                    return [
+                        'ok' => false,
+                        'applied' => $completed,
+                        'error' => "Migration {$name} ran, but its required schema changes could not be verified. It was not marked as applied.",
+                    ];
+                }
                 $st = $this->db->prepare(
                     'INSERT INTO schema_migrations
                         (migration, checksum, statements_run, statements_skipped, applied_by)
@@ -130,12 +137,15 @@ class MigrationService
         if ($marker->fetchColumn()) {
             return;
         }
-        $rolesExist = (int) $this->db->query(
+        $required = ['roles', 'users', 'tenants', 'products', 'sales', 'sale_items', 'orders', 'order_items'];
+        $placeholders = implode(',', array_fill(0, count($required), '?'));
+        $ready = $this->db->prepare(
             "SELECT COUNT(*) FROM information_schema.tables
-              WHERE table_schema = DATABASE() AND table_name = 'roles'"
-        )->fetchColumn() > 0;
-        if (!$rolesExist) {
-            return;
+              WHERE table_schema = DATABASE() AND table_name IN ({$placeholders})"
+        );
+        $ready->execute($required);
+        if ((int) $ready->fetchColumn() !== count($required)) {
+            throw new RuntimeException('This database is not ready for incremental updates. Complete the initial database setup first.');
         }
         $this->db->beginTransaction();
         try {
@@ -169,6 +179,62 @@ class MigrationService
     private function version(string $name): int
     {
         return preg_match('/^(\d{3})_/', $name, $match) ? (int) $match[1] : PHP_INT_MAX;
+    }
+
+    private function validateMigration(int $version): bool
+    {
+        if ($version === 65) {
+            return $this->tableExists('customers');
+        }
+        if ($version === 66) {
+            return $this->columnExists('tenants', 'enabled_modules');
+        }
+        if ($version === 67) {
+            return $this->columnExists('products', 'retail_pack_price')
+                && $this->columnExists('products', 'package_buying_price')
+                && $this->columnContains('sale_items', 'price_type', 'retail_pack')
+                && $this->columnContains('order_items', 'price_type', 'retail_pack')
+                && $this->columnContains('held_order_items', 'price_type', 'retail_pack');
+        }
+        if ($version === 68) {
+            return $this->columnExists('product_returns', 'financial_snapshot')
+                && $this->columnExists('product_returns', 'undone_at')
+                && $this->columnExists('product_returns', 'undone_by');
+        }
+        if ($version === 69) {
+            return $this->columnExists('tenants', 'enabled_modules')
+                && $this->columnExists('tenants', 'product_commission_enabled');
+        }
+        return true;
+    }
+
+    private function tableExists(string $table): bool
+    {
+        $st = $this->db->prepare(
+            'SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?'
+        );
+        $st->execute([$table]);
+        return (int) $st->fetchColumn() > 0;
+    }
+
+    private function columnExists(string $table, string $column): bool
+    {
+        $st = $this->db->prepare(
+            'SELECT COUNT(*) FROM information_schema.columns
+              WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?'
+        );
+        $st->execute([$table, $column]);
+        return (int) $st->fetchColumn() > 0;
+    }
+
+    private function columnContains(string $table, string $column, string $value): bool
+    {
+        $st = $this->db->prepare(
+            'SELECT column_type FROM information_schema.columns
+              WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ? LIMIT 1'
+        );
+        $st->execute([$table, $column]);
+        return stripos((string) $st->fetchColumn(), $value) !== false;
     }
 
     private function splitSql(string $sql): array
