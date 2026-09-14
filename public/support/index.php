@@ -24,6 +24,7 @@ try {
 $schemaReady = $setup ? $setup->schemaReady() : false;
 $owner = $setup ? $setup->owner() : null;
 $ownerWasPresent = $owner !== null;
+$schemaReady = $schemaReady || $ownerWasPresent;
 $fullyAuthenticated = !empty($_SESSION['logged_in']) && !empty($_SESSION['otp_verified']) && TenantContext::check();
 
 // Before an owner exists there is nobody who can authenticate normally.

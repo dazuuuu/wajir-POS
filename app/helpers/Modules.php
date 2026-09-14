@@ -71,10 +71,12 @@ class Modules
                     $st = Database::pdo()->prepare('SELECT enabled_modules FROM tenants WHERE id = ? LIMIT 1');
                     $st->execute([$tenantId]);
                     self::$tenantCache[$tenantId] = $st->fetchColumn();
+                } catch (\PDOException $e) {
+                    // Preserve all historical modules only for the known
+                    // upgrade case where the new column does not exist.
+                    self::$tenantCache[$tenantId] = $e->getCode() === '42S22' ? null : false;
                 } catch (\Throwable $e) {
-                    // Preserve behavior on an installation that has not yet
-                    // added the module column.
-                    self::$tenantCache[$tenantId] = null;
+                    self::$tenantCache[$tenantId] = false;
                 }
             }
             $raw = self::$tenantCache[$tenantId];

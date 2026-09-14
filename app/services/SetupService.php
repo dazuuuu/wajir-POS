@@ -2,6 +2,8 @@
 
 class SetupService
 {
+    private const SCHEMA_VERSION = '1';
+
     private PDO $db;
 
     public function __construct(?PDO $db = null)
@@ -22,7 +24,11 @@ class SetupService
                 return false;
             }
         }
-        return true;
+        try {
+            return (new SettingModel($this->db))->get('support_schema_version') === self::SCHEMA_VERSION;
+        } catch (Throwable $e) {
+            return false;
+        }
     }
 
     public function owner(): ?array
@@ -65,8 +71,7 @@ class SetupService
                 $ran++;
             } catch (PDOException $e) {
                 $code = (int) ($e->errorInfo[1] ?? 0);
-                if (in_array($code, $tolerable, true)
-                    || ($code === 1054 && preg_match('/^\s*ALTER\s+TABLE\b/i', $statement))) {
+                if (in_array($code, $tolerable, true)) {
                     $skipped++;
                     continue;
                 }
@@ -78,6 +83,7 @@ class SetupService
                 ];
             }
         }
+        (new SettingModel($this->db))->set('support_schema_version', self::SCHEMA_VERSION);
         return ['ok' => true, 'ran' => $ran, 'skipped' => $skipped, 'error' => null];
     }
 
