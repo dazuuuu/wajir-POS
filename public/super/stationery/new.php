@@ -83,8 +83,12 @@ function single_product_package_fields(array $row, array $units): array
 }
 
 $error = '';
+$defaultDestination = in_array($_GET['destination'] ?? '', ['store', 'shop'], true)
+    ? $_GET['destination']
+    : 'store';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $destination = in_array($_POST['destination'] ?? '', ['store', 'shop'], true) ? $_POST['destination'] : 'store';
+    $destination = in_array($_POST['destination'] ?? '', ['store', 'shop'], true) ? $_POST['destination'] : $defaultDestination;
+    $defaultDestination = $destination;
     $name = trim($_POST['name'] ?? '');
     $pkg = single_product_package_fields($_POST, $units);
     $packageQty = max(0, (float) ($_POST['package_quantity'] ?? 0));
@@ -140,6 +144,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'package_buying_price' => $buyingPrice > 0 ? $buyingPrice : ($existing['package_buying_price'] ?? null),
                         'retail_price' => $sellingPrice > 0 ? $sellingPrice : ($existing['retail_price'] ?? 0),
                         'wholesale_price' => $unitWholesale > 0 ? $unitWholesale : ($existing['wholesale_price'] ?? 0),
+                        'units_per_pack' => $effectiveInside > 1 ? $effectiveInside : ($existing['units_per_pack'] ?? 1),
+                        'pack_unit' => $receiveUnit ?: ($existing['pack_unit'] ?? null),
+                        'pack_price' => $wholesalePrice > 0 ? $wholesalePrice : ($existing['pack_price'] ?? null),
+                        'retail_pack_price' => $retailPackPrice > 0 ? $retailPackPrice : ($existing['retail_pack_price'] ?? null),
                     ]));
                 } else {
                     $P->create([
@@ -253,7 +261,7 @@ ob_start();
       <div class="row g-3">
         <div class="col-12 col-md-6">
           <label class="d-flex align-items-start p-3 border rounded cursor-pointer h-100" style="cursor:pointer;border-radius:10px;">
-            <input type="radio" name="destination" value="store" class="form-check-input me-3 mt-1 dest-radio" checked id="destStore">
+            <input type="radio" name="destination" value="store" class="form-check-input me-3 mt-1 dest-radio" <?php echo $defaultDestination === 'store' ? 'checked' : ''; ?> id="destStore">
             <div>
               <div class="fw-bold text-dark"><i class="fas fa-box-archive text-primary me-2"></i>Store (Warehouse)</div>
               <div class="small text-muted mt-1">Product lands in the Store warehouse awaiting transfer to shop via invoice.</div>
@@ -262,7 +270,7 @@ ob_start();
         </div>
         <div class="col-12 col-md-6">
           <label class="d-flex align-items-start p-3 border rounded cursor-pointer h-100" style="cursor:pointer;border-radius:10px;">
-            <input type="radio" name="destination" value="shop" class="form-check-input me-3 mt-1 dest-radio" id="destShop">
+            <input type="radio" name="destination" value="shop" class="form-check-input me-3 mt-1 dest-radio" <?php echo $defaultDestination === 'shop' ? 'checked' : ''; ?> id="destShop">
             <div>
               <div class="fw-bold text-dark"><i class="fas fa-store text-success me-2"></i>Shop (Active Inventory)</div>
               <div class="small text-muted mt-1">Product appears directly in shop Inventory, available immediately for cashier counter sales.</div>

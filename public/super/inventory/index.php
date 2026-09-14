@@ -83,8 +83,8 @@ ob_start();
   </div>
   <?php if ($canEdit): ?>
     <a href="<?php echo $storeUrl; ?>" class="btn btn-outline-secondary btn-sm"><i class="fas fa-box-archive me-1"></i>Store warehouse</a>
-    <a href="<?php echo $productUrl; ?>" class="btn btn-outline-primary btn-sm"><i class="fas fa-box-open me-1"></i>Record to Store</a>
-    <a href="<?php echo $stockUrl; ?>" class="btn btn-primary btn-sm"><i class="fas fa-boxes-stacked me-1"></i>Bulk to Store</a>
+    <a href="<?php echo $productUrl; ?>?destination=shop" class="btn btn-outline-primary btn-sm"><i class="fas fa-box-open me-1"></i>Record stock to Shop</a>
+    <a href="<?php echo $stockUrl; ?>?destination=shop" class="btn btn-primary btn-sm"><i class="fas fa-boxes-stacked me-1"></i>Bulk stock to Shop</a>
   <?php endif; ?>
 </div>
 
@@ -242,6 +242,9 @@ ob_start();
               $packUnit = trim((string)($p['pack_unit'] ?? ''));
               $packBuy = ($p['package_buying_price'] ?? '') !== '' && $p['package_buying_price'] !== null ? (float)$p['package_buying_price'] : 0.0;
               $packSell = ($p['pack_price'] ?? '') !== '' && $p['pack_price'] !== null ? (float)$p['pack_price'] : 0.0;
+              $retailPackSell = ($p['retail_pack_price'] ?? '') !== '' && $p['retail_pack_price'] !== null
+                  ? (float) $p['retail_pack_price']
+                  : ($retail * $unitsPerPack);
               $hasPack = $packUnit !== '' && $unitsPerPack > 1;
               $packageCount = $hasPack ? floor(($qty / $unitsPerPack) * 100) / 100 : $qty;
               $retailProfitTotal = ($retail - $buy) * $qty;
@@ -294,6 +297,7 @@ ob_start();
                 <div>Retail: KES <?php echo number_format($retail, 0); ?></div>
               <?php endif; ?>
               <?php if ($hasPack): ?>
+                <div class="text-muted small">Retail/<?php echo htmlspecialchars($packUnit); ?>: KES <?php echo number_format($retailPackSell, 0); ?></div>
                 <div class="text-muted small">Wholesale/<?php echo htmlspecialchars($packUnit); ?>: <?php echo $packSell > 0 ? 'KES ' . number_format($packSell, 0) : '<span class="text-danger">missing</span>'; ?></div>
               <?php endif; ?>
             </td>

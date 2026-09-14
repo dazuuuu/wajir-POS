@@ -93,7 +93,7 @@ if ($moduleOn('services')) {
     <a class="t-sublink t-subsub <?php echo $menuOn('/purchases/transfer'); ?>" href="<?php echo public_url('super/purchases/transfer.php'); ?>">Transfer purchases</a>
     <a class="t-sublink <?php echo $menuOn('/suppliers'); ?>" href="<?php echo public_url('super/suppliers/'); ?>">Suppliers</a>
     <a class="t-sublink <?php echo $menuOn('/stationery'); ?>" href="<?php echo public_url('super/stationery/new.php'); ?>">Record Stock</a>
-    <a class="t-sublink <?php echo $menuOn('/stock'); ?>" href="<?php echo public_url('super/stock/new.php'); ?>">Bulk Stock</a>
+    <a class="t-sublink <?php echo $menuOn('/stock'); ?>" href="<?php echo public_url('super/stock/new.php?destination=shop'); ?>">Record stock to Shop</a>
     <a class="t-sublink <?php echo $menuOn('/inventory/low-stock'); ?>" href="<?php echo public_url('super/inventory/low-stock.php'); ?>">Low Stock Alerts</a>
     <a class="t-sublink <?php echo $menuOn('/publishers'); ?>" href="<?php echo public_url('super/publishers/'); ?>">Brands</a>
     <a class="t-sublink <?php echo $menuOn('/categories'); ?>" href="<?php echo public_url('super/categories/'); ?>">Categories</a>

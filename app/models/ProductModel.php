@@ -273,6 +273,12 @@ class ProductModel extends Model
             $r['on_offer']        = $eff['on_offer'];
             $r['offer_ends_at']   = $eff['ends_at'];
             $r['wholesale_price'] = (float) ($r['wholesale_price'] ?? $r['selling_price'] ?? 0);
+            if ((float) ($r['retail_pack_price'] ?? 0) <= 0
+                && (float) ($r['units_per_pack'] ?? 1) > 1
+                && trim((string) ($r['pack_unit'] ?? '')) !== ''
+                && (float) $eff['regular_price'] > 0) {
+                $r['retail_pack_price'] = round((float) $eff['regular_price'] * (float) $r['units_per_pack'], 2);
+            }
             $r['is_archived']     = $r['status'] === 'archived';
             $r['colors']          = $r['colors'] ? (json_decode($r['colors'], true) ?: []) : [];
             $r['sizes']           = $r['sizes'] ? (json_decode($r['sizes'], true) ?: []) : [];
@@ -620,6 +626,9 @@ class ProductModel extends Model
         }
         if (isset($in['pack_price']) && $in['pack_price'] !== '' && (!is_numeric($in['pack_price']) || (float) $in['pack_price'] < 0)) {
             $errors['pack_price'] = 'Enter a valid package price.';
+        }
+        if (isset($in['retail_pack_price']) && $in['retail_pack_price'] !== '' && (!is_numeric($in['retail_pack_price']) || (float) $in['retail_pack_price'] < 0)) {
+            $errors['retail_pack_price'] = 'Enter a valid retail package price.';
         }
         if (isset($in['retail_price']) && $in['retail_price'] !== '' && (!is_numeric($in['retail_price']) || (float) $in['retail_price'] < 0)) {
             $errors['retail_price'] = 'Enter a valid retail price.';
