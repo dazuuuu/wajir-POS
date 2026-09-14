@@ -164,6 +164,7 @@ try {
     usort($byProduct, fn($a, $b) => $b['profit'] <=> $a['profit']);
     $productProfit = array_values($byProduct);
 } catch (\Throwable $e) {
+    error_log('Sales profit calculation failed: ' . $e->getMessage());
     $profitAvailable = false;
     $profitReason    = ($e->getMessage() === 'NO_COST_COLUMN') ? 'no_column' : 'error';
 }
@@ -455,8 +456,8 @@ ob_start();
       </div>
       <?php else: ?>
       <div class="alert alert-danger mb-0">
-        Couldn't calculate profit. Check the database connection and that the
-        <code>sale_items</code> and <code>products</code> tables are reachable.
+        Couldn't calculate profit. The technical error has been logged. Check
+        that the sales, orders, returns and products schema is up to date.
       </div>
       <?php endif; ?>
     <?php elseif (!$productProfit): ?>

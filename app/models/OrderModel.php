@@ -21,6 +21,7 @@ class OrderModel extends Model
     {
         parent::__construct($db);
         $this->ensurePaymentSchema();
+        ReturnModel::ensureTableExists($this->db);
     }
 
     /**

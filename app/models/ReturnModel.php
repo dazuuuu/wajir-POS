@@ -473,8 +473,16 @@ class ReturnModel extends Model
 
     private function ensureSchema(): void
     {
+        self::ensureTableExists($this->db);
+        $this->ensureColumn('product_returns', 'migrated_at', "ALTER TABLE product_returns ADD COLUMN migrated_at DATETIME NULL AFTER processed_by");
+        $this->ensureColumn('product_returns', 'migrated_by', "ALTER TABLE product_returns ADD COLUMN migrated_by INT NULL AFTER migrated_at");
+    }
+
+    /** Reporting models also join returns before the Returns page is opened. */
+    public static function ensureTableExists(\PDO $db): void
+    {
         try {
-            $this->db->exec(
+            $db->exec(
                 "CREATE TABLE IF NOT EXISTS product_returns (
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     tenant_id INT NOT NULL,
@@ -499,8 +507,6 @@ class ReturnModel extends Model
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
             );
         } catch (\PDOException $ignored) {}
-        $this->ensureColumn('product_returns', 'migrated_at', "ALTER TABLE product_returns ADD COLUMN migrated_at DATETIME NULL AFTER processed_by");
-        $this->ensureColumn('product_returns', 'migrated_by', "ALTER TABLE product_returns ADD COLUMN migrated_by INT NULL AFTER migrated_at");
     }
 
     private function ensureColumn(string $table, string $column, string $sql): void

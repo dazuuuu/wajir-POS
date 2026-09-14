@@ -10,6 +10,7 @@ class SaleModel extends Model
     {
         parent::__construct($db);
         $this->ensureSchema();
+        ReturnModel::ensureTableExists($this->db);
     }
 
     /**
