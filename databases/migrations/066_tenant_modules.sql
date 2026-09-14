@@ -2,4 +2,4 @@
 -- NULL preserves all modules for installations that have not been configured.
 
 ALTER TABLE tenants
-    ADD COLUMN enabled_modules JSON NULL AFTER payment_credentials;
+    ADD COLUMN enabled_modules JSON NULL;

@@ -1,6 +1,9 @@
 -- New businesses start with every feature available. Upgrade tenants that
 -- still have the former six-module default without overwriting custom choices.
 
+ALTER TABLE tenants
+    ADD COLUMN product_commission_enabled TINYINT(1) NOT NULL DEFAULT 0;
+
 UPDATE tenants
    SET enabled_modules = JSON_ARRAY(
        'credit_sales', 'returns', 'inventory', 'customers', 'reports', 'documents',

@@ -2,12 +2,13 @@
 
 /**
  * Runs versioned database updates after the initial installation. The first
- * use on an existing installation records migrations 001-066 as its baseline;
+ * use on an existing installation records migrations 001-064 as its baseline;
  * later files are then applied once and tracked.
  */
 class MigrationService
 {
-    private const BASELINE_VERSION = 66;
+    private const BASELINE_VERSION = 64;
+    private const BASELINE_MARKER = '__baseline_064__';
     private const TOLERABLE_CODES = [1050, 1060, 1061, 1062, 1091, 1826];
 
     private PDO $db;
@@ -40,7 +41,7 @@ class MigrationService
         return [
             'all' => $all,
             'pending' => array_values(array_filter($all, static fn(array $row): bool => !$row['applied'])),
-            'applied_count' => count($applied),
+            'applied_count' => count(array_filter($all, static fn(array $row): bool => $row['applied'])),
         ];
     }
 
@@ -53,6 +54,14 @@ class MigrationService
         $completed = [];
         try {
             $status = $this->status();
+            $changed = array_values(array_filter($status['all'], static fn(array $row): bool => $row['changed']));
+            if ($changed) {
+                return [
+                    'ok' => false,
+                    'applied' => [],
+                    'error' => 'An already-applied migration file has changed. Deploy a new numbered migration instead of editing migration history.',
+                ];
+            }
             $pendingNames = array_column($status['pending'], 'name');
             foreach ($this->files() as $file) {
                 $name = basename($file);
@@ -116,7 +125,9 @@ class MigrationService
 
     private function bootstrapBaseline(): void
     {
-        if ((int) $this->db->query('SELECT COUNT(*) FROM schema_migrations')->fetchColumn() > 0) {
+        $marker = $this->db->prepare('SELECT 1 FROM schema_migrations WHERE migration = ?');
+        $marker->execute([self::BASELINE_MARKER]);
+        if ($marker->fetchColumn()) {
             return;
         }
         $rolesExist = (int) $this->db->query(
@@ -126,15 +137,25 @@ class MigrationService
         if (!$rolesExist) {
             return;
         }
-        $insert = $this->db->prepare(
-            'INSERT IGNORE INTO schema_migrations (migration, checksum, statements_run, statements_skipped)
-             VALUES (?,?,0,0)'
-        );
-        foreach ($this->files() as $file) {
-            $name = basename($file);
-            if ($this->version($name) <= self::BASELINE_VERSION) {
-                $insert->execute([$name, hash_file('sha256', $file)]);
+        $this->db->beginTransaction();
+        try {
+            $insert = $this->db->prepare(
+                'INSERT IGNORE INTO schema_migrations (migration, checksum, statements_run, statements_skipped)
+                 VALUES (?,?,0,0)'
+            );
+            foreach ($this->files() as $file) {
+                $name = basename($file);
+                if ($this->version($name) <= self::BASELINE_VERSION) {
+                    $insert->execute([$name, hash_file('sha256', $file)]);
+                }
             }
+            $insert->execute([self::BASELINE_MARKER, hash('sha256', 'baseline-' . self::BASELINE_VERSION)]);
+            $this->db->commit();
+        } catch (Throwable $e) {
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            throw $e;
         }
     }
 
