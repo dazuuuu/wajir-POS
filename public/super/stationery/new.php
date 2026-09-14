@@ -83,10 +83,16 @@ function single_product_package_fields(array $row, array $units): array
 }
 
 $error = '';
+if (empty($_SESSION['record_single_stock_csrf'])) {
+    $_SESSION['record_single_stock_csrf'] = bin2hex(random_bytes(24));
+}
+$recordSingleStockCsrf = $_SESSION['record_single_stock_csrf'];
 $defaultDestination = in_array($_GET['destination'] ?? '', ['store', 'shop'], true)
     ? $_GET['destination']
     : 'store';
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && !hash_equals($recordSingleStockCsrf, (string) ($_POST['csrf'] ?? ''))) {
+    $error = 'This stock request expired. Reload the page and try again.';
+} elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $destination = in_array($_POST['destination'] ?? '', ['store', 'shop'], true) ? $_POST['destination'] : $defaultDestination;
     $defaultDestination = $destination;
     $name = trim($_POST['name'] ?? '');
@@ -256,6 +262,7 @@ ob_start();
 </div>
 
 <form method="post" enctype="multipart/form-data" class="card border-0 shadow-sm" style="border-radius:12px;" novalidate>
+  <input type="hidden" name="csrf" value="<?php echo htmlspecialchars($recordSingleStockCsrf); ?>">
   <div class="card-body p-4">
     <div class="mb-4">
       <label class="form-label fw-semibold">Destination</label>

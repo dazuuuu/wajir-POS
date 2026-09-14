@@ -100,10 +100,16 @@ function stock_package_fields(array $row, array $units): array
 }
 
 $error = '';
+if (empty($_SESSION['record_stock_csrf'])) {
+    $_SESSION['record_stock_csrf'] = bin2hex(random_bytes(24));
+}
+$recordStockCsrf = $_SESSION['record_stock_csrf'];
 $defaultDestination = in_array($_GET['destination'] ?? '', ['store', 'shop'], true)
     ? $_GET['destination']
     : 'store';
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && !hash_equals($recordStockCsrf, (string) ($_POST['csrf'] ?? ''))) {
+    $error = 'This stock request expired. Reload the page and try again.';
+} elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $destination = in_array($_POST['destination'] ?? '', ['store', 'shop'], true) ? $_POST['destination'] : $defaultDestination;
     $defaultDestination = $destination;
     $supplierName = trim($_POST['supplier'] ?? '');
@@ -218,7 +224,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($destination === 'shop') {
             $savedCount = 0;
             $saveErrors = [];
-            foreach ($items as $it) {
+            try {
+                $pdo->beginTransaction();
+                foreach ($items as $it) {
                 if (!empty($it['product_id'])) {
                     $curr = $P->find((int) $it['product_id']);
                     if ($curr) {
@@ -270,14 +278,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $saveErrors[] = $it['name'] . ': ' . implode(' ', $pRes['errors'] ?? ['Could not save product.']);
                     }
                 }
+                }
+                if ($saveErrors) {
+                    $pdo->rollBack();
+                    $savedCount = 0;
+                } else {
+                    $pdo->commit();
+                }
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) { $pdo->rollBack(); }
+                error_log('Direct shop stock intake failed: ' . $e->getMessage());
+                $savedCount = 0;
+                $saveErrors[] = 'The stock batch could not be saved. No rows were added.';
             }
             if (!$saveErrors) {
                 $_SESSION['flash']['success'] = $savedCount . ' product' . ($savedCount === 1 ? '' : 's') . ' saved directly to Shop (Inventory) and ready to sell.';
                 header('Location: ' . public_url('super/inventory/'));
                 exit;
             }
-            $error = ($savedCount > 0 ? $savedCount . ' product(s) saved. ' : '')
-                . 'Could not save: ' . implode(' | ', $saveErrors);
+            $error = 'No stock was added. Could not save: ' . implode(' | ', $saveErrors);
         } else {
             $res = $SP->createMany($items, TenantContext::userId());
             if ($res['ok']) {
@@ -296,6 +315,7 @@ ob_start();
 <?php if ($error): ?><div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
 
 <form method="post" enctype="multipart/form-data" id="stockForm" novalidate>
+  <input type="hidden" name="csrf" value="<?php echo htmlspecialchars($recordStockCsrf); ?>">
   <div class="card border-0 shadow-sm mb-4" style="border-radius:12px;">
     <div class="card-body p-4">
       <h2 class="h5 mb-2">Record Destination</h2>

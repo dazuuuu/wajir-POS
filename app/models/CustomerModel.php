@@ -106,12 +106,7 @@ class CustomerModel extends Model
     public function adjustPoints(int $customerId, float $points, string $reason, ?int $orderId = null, ?int $createdBy = null, bool $allowNegative = false): bool
     {
         $tid = \TenantContext::tenantId();
-        $cust = $this->find($customerId);
-        if (!$cust || (int) $cust['tenant_id'] !== (int) $tid) {
-            return false;
-        }
-        $new = round((float) $cust['loyalty_points'] + $points, 2);
-        if ($new < 0 && !$allowNegative) {
+        if ($tid === null || $customerId <= 0) {
             return false;
         }
         // Do not nest transactions — markPaid may already be inside one.
@@ -121,7 +116,23 @@ class CustomerModel extends Model
                 $this->db->beginTransaction();
                 $started = true;
             }
-            $this->update($customerId, ['loyalty_points' => $new]);
+            $lock = $this->db->prepare(
+                'SELECT loyalty_points FROM customers WHERE id = ? AND tenant_id = ? FOR UPDATE'
+            );
+            $lock->execute([$customerId, $tid]);
+            $current = $lock->fetchColumn();
+            if ($current === false) {
+                if ($started) { $this->db->rollBack(); }
+                return false;
+            }
+            $new = round((float) $current + $points, 2);
+            if ($new < 0 && !$allowNegative) {
+                if ($started) { $this->db->rollBack(); }
+                return false;
+            }
+            $this->db->prepare(
+                'UPDATE customers SET loyalty_points = ? WHERE id = ? AND tenant_id = ?'
+            )->execute([$new, $customerId, $tid]);
             $st = $this->db->prepare(
                 'INSERT INTO loyalty_transactions (tenant_id, customer_id, order_id, points, reason, created_by) VALUES (?,?,?,?,?,?)'
             );

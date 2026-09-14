@@ -39,6 +39,10 @@ $openingDeposit = 0.0;
 $openingDepositMethod = 'cash';
 $canTakeOpeningDeposit = TenantContext::role() === 'tenant_owner' || TenantContext::can(Capabilities::PAYMENTS_PROCESS);
 $depositMethods = PaymentOptions::depositMethods($tenant);
+if (empty($_SESSION['credit_sale_csrf'])) {
+    $_SESSION['credit_sale_csrf'] = bin2hex(random_bytes(24));
+}
+$creditSaleCsrf = $_SESSION['credit_sale_csrf'];
 
 $normalizePriceType = static function ($type): string {
     return in_array($type, ['retail', 'retail_pack', 'wholesale'], true) ? $type : 'retail';
@@ -74,7 +78,9 @@ if ($resumeId > 0) {
     }
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && !hash_equals($creditSaleCsrf, (string) ($_POST['csrf'] ?? ''))) {
+    $error = 'This credit-sale request expired. Reload the page and try again.';
+} elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? 'checkout';
     $cart = json_decode($_POST['cart'] ?? '[]', true);
     $cartJson = $_POST['cart'] ?? '[]';
@@ -216,6 +222,7 @@ ob_start();
 <input type="hidden" name="action" id="formAction" value="checkout">
 <input type="hidden" name="cart" id="cartInput" value="">
 <input type="hidden" name="held_order_id" value="<?php echo (int) $heldOrderId; ?>">
+<input type="hidden" name="csrf" value="<?php echo htmlspecialchars($creditSaleCsrf); ?>">
 <input type="hidden" name="customer_id" id="customerIdInput" value="<?php echo (int) $customerId; ?>">
 
 <div class="pos-grid">
