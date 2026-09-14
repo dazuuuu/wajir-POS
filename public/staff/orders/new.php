@@ -359,8 +359,18 @@ ob_start();
       </div>
     </div>
 
-    <div class="pos-cart" id="cartRows">
-      <div class="text-muted small text-center py-4" id="cartEmpty">Tap a product to add it. Type qty for retail items, retail boxes, and/or wholesale packs.</div>
+    <div class="pos-cart-wrap">
+      <div class="pos-cart-search-wrap mb-2" id="cartSearchWrap" style="display:none;">
+        <div class="pos-cart-search-box">
+          <i class="fas fa-search pos-cart-search-icon"></i>
+          <input type="text" id="cartSearchInput" class="pos-cart-search-input" placeholder="Search products in this sale..." autocomplete="off">
+          <button type="button" id="cartSearchClear" class="pos-cart-search-clear" style="display:none;" title="Clear search"><i class="fas fa-xmark"></i></button>
+        </div>
+        <div id="cartSearchCount" class="small text-muted mt-1" style="display:none;"></div>
+      </div>
+      <div class="pos-cart" id="cartRows">
+        <div class="text-muted small text-center py-4" id="cartEmpty">Tap a product to add it. Type qty for retail items, retail boxes, and/or wholesale packs.</div>
+      </div>
     </div>
 
     <div class="pos-totals">
@@ -452,6 +462,11 @@ ob_start();
 .customer-suggest-menu button{display:block;width:100%;border:0;background:#fff;text-align:left;padding:.55rem .7rem;font-size:.85rem;}
 .customer-suggest-menu button:hover{background:#f8fafc;}
 .customer-suggest-menu .meta{display:block;color:#64748b;font-size:.75rem;margin-top:1px;}
+.pos-cart-search-box{position:relative;}
+.pos-cart-search-icon{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:#94a3b8;font-size:.8rem;}
+.pos-cart-search-input{width:100%;border:1px solid #e2e8f0;border-radius:9px;padding:8px 32px 8px 32px;font-size:.82rem;background:#f8fafc;}
+.pos-cart-search-input:focus{outline:none;border-color:var(--pos-green);background:#fff;box-shadow:0 0 0 .15rem rgba(22,163,74,.1);}
+.pos-cart-search-clear{position:absolute;right:7px;top:50%;transform:translateY(-50%);border:0;background:transparent;color:#64748b;padding:3px 5px;}
 .pos-cart{max-height:320px;overflow-y:auto;margin:14px 0;}
 .pos-cart-line{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid #f3f4f7;}
 .pos-cart-line img, .pos-cart-line .ph{width:38px;height:38px;border-radius:8px;object-fit:cover;background:#f3f4f7;display:flex;align-items:center;justify-content:center;color:#d7d9df;flex-shrink:0;margin-top:2px;}
@@ -674,10 +689,58 @@ function updateTotals() {
     document.getElementById('totalOut').textContent = money(sub - d + extra);
 }
 
+var cartSearchQuery = '';
+var cartSearchInput = document.getElementById('cartSearchInput');
+var cartSearchClear = document.getElementById('cartSearchClear');
+var cartSearchCount = document.getElementById('cartSearchCount');
+if (cartSearchInput) {
+    cartSearchInput.addEventListener('input', function () {
+        cartSearchQuery = cartSearchInput.value.toLowerCase().trim();
+        if (cartSearchClear) cartSearchClear.style.display = cartSearchQuery ? 'block' : 'none';
+        render();
+    });
+}
+if (cartSearchClear) {
+    cartSearchClear.addEventListener('click', function () {
+        cartSearchQuery = '';
+        if (cartSearchInput) {
+            cartSearchInput.value = '';
+            cartSearchInput.focus();
+        }
+        cartSearchClear.style.display = 'none';
+        render();
+    });
+}
+
 function render() {
-    var wrap = document.getElementById('cartRows'), ids = Object.keys(cart);
-    wrap.innerHTML = ids.length ? '' : '<div class="text-muted small text-center py-4" id="cartEmpty">Tap a product to add it. Type qty for retail items, retail boxes, and/or wholesale packs.</div>';
-    ids.forEach(function (id) {
+    var wrap = document.getElementById('cartRows');
+    var searchWrap = document.getElementById('cartSearchWrap');
+    var ids = Object.keys(cart).filter(function (id) { return cart[id] && !PC.isEmpty(cart[id]); });
+    var visibleIds = ids;
+    if (cartSearchQuery) {
+        visibleIds = ids.filter(function (id) {
+            var p = PRODUCTS[id];
+            if (!p) return false;
+            var nameMatch = (p.name || '').toLowerCase().indexOf(cartSearchQuery) !== -1;
+            var barcodeMatch = Object.keys(BARCODES).some(function (code) {
+                return BARCODES[code] === id && code.toLowerCase().indexOf(cartSearchQuery) !== -1;
+            });
+            return nameMatch || barcodeMatch;
+        });
+    }
+    if (searchWrap) searchWrap.style.display = ids.length ? 'block' : 'none';
+    if (cartSearchCount) {
+        cartSearchCount.style.display = cartSearchQuery ? 'block' : 'none';
+        cartSearchCount.textContent = 'Showing ' + visibleIds.length + ' of ' + ids.length + ' products';
+    }
+    if (!ids.length) {
+        wrap.innerHTML = '<div class="text-muted small text-center py-4" id="cartEmpty">Tap a product to add it. Type qty for retail items, retail boxes, and/or wholesale packs.</div>';
+    } else if (!visibleIds.length) {
+        wrap.innerHTML = '<div class="text-muted small text-center py-4"><i class="fas fa-magnifying-glass me-1"></i>No product in this sale matches your search.</div>';
+    } else {
+        wrap.innerHTML = '';
+    }
+    visibleIds.forEach(function (id) {
         var p = PRODUCTS[id], c = cart[id];
         if (!p || !c) return;
         var retailMax = Math.max(c.retail || 0, PC.maxRetail(p, c));

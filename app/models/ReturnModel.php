@@ -9,6 +9,38 @@ class ReturnModel extends Model
     {
         parent::__construct($db);
         $this->ensureSchema();
+        CustomerModel::ensureTableExists($this->db);
+    }
+
+    /** Load an exact source without relying on potentially duplicated receipt numbers. */
+    public function findSource(string $sourceType, int $sourceId): ?array
+    {
+        $tid = \TenantContext::tenantId();
+        if ($tid === null || $sourceId <= 0 || !in_array($sourceType, ['order', 'sale'], true)) {
+            return null;
+        }
+        if ($sourceType === 'order') {
+            $st = $this->db->prepare(
+                "SELECT 'order' AS source_type, o.id, o.receipt_number, o.table_name AS customer_name,
+                        o.status, o.total, o.created_at, u.username AS staff_name
+                   FROM orders o
+              LEFT JOIN users u ON u.id = o.opened_by
+                  WHERE o.tenant_id = ? AND o.id = ? AND o.status <> 'void'
+                  LIMIT 1"
+            );
+        } else {
+            $st = $this->db->prepare(
+                "SELECT 'sale' AS source_type, s.id, s.receipt_number, s.customer_name,
+                        s.status, s.total, s.created_at, u.username AS staff_name
+                   FROM sales s
+              LEFT JOIN users u ON u.id = s.staff_id
+                  WHERE s.tenant_id = ? AND s.id = ? AND s.status <> 'voided'
+                  LIMIT 1"
+            );
+        }
+        $st->execute([$tid, $sourceId]);
+        $row = $st->fetch();
+        return $row ?: null;
     }
 
     public function findReceipt(string $receipt): ?array
@@ -59,17 +91,23 @@ class ReturnModel extends Model
                    ) AS items_summary
               FROM orders o
          LEFT JOIN users u ON u.id = o.opened_by
+         LEFT JOIN customers c ON c.id = o.customer_id AND c.tenant_id = o.tenant_id
              WHERE o.tenant_id = ? AND o.status <> 'void'
         ";
         $orderParams = [$tid];
         if ($q !== '') {
             $orderSql .= " AND (
-                o.receipt_number LIKE ? OR o.table_name LIKE ?
+                o.receipt_number LIKE ? OR o.table_name LIKE ? OR COALESCE(o.customer_phone, '') LIKE ?
+                OR COALESCE(c.name, '') LIKE ? OR COALESCE(c.company_name, '') LIKE ? OR COALESCE(c.phone, '') LIKE ?
                 OR EXISTS (
                     SELECT 1 FROM order_items oi2
                      WHERE oi2.tenant_id = o.tenant_id AND oi2.order_id = o.id AND oi2.product_name LIKE ?
                 )
             )";
+            $orderParams[] = $like;
+            $orderParams[] = $like;
+            $orderParams[] = $like;
+            $orderParams[] = $like;
             $orderParams[] = $like;
             $orderParams[] = $like;
             $orderParams[] = $like;
@@ -104,21 +142,25 @@ class ReturnModel extends Model
         }
         $saleSql .= " ORDER BY s.id DESC LIMIT " . (int)$limit;
 
+        $orders = [];
+        $sales = [];
         try {
             $st1 = $this->db->prepare($orderSql);
             $st1->execute($orderParams);
             $orders = $st1->fetchAll(\PDO::FETCH_ASSOC) ?: [];
-
+        } catch (\Throwable $e) {
+            error_log('ReturnModel::searchReceipts orders failed: ' . $e->getMessage());
+        }
+        try {
             $st2 = $this->db->prepare($saleSql);
             $st2->execute($saleParams);
             $sales = $st2->fetchAll(\PDO::FETCH_ASSOC) ?: [];
-
-            $combined = array_merge($orders, $sales);
-            usort($combined, fn($a, $b) => strtotime($b['created_at']) <=> strtotime($a['created_at']));
-            return array_slice($combined, 0, $limit);
         } catch (\Throwable $e) {
-            return [];
+            error_log('ReturnModel::searchReceipts sales failed: ' . $e->getMessage());
         }
+        $combined = array_merge($orders, $sales);
+        usort($combined, fn($a, $b) => strtotime($b['created_at']) <=> strtotime($a['created_at']));
+        return array_slice($combined, 0, $limit);
     }
 
     public function receiptItems(string $sourceType, int $sourceId): array

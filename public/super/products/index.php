@@ -217,8 +217,16 @@ $actionBadge = function (string $a): string {
       <div class="card-body p-4">
         <p class="text-muted small mb-3">Stock value = buying price &times; quantity. To add new stock or a new product, use <a href="<?php echo public_url('super/stock/new.php'); ?>">Record products</a>.</p>
 
-        <?php if (!empty($errors['_'])): ?><div class="alert alert-danger py-2"><?php echo htmlspecialchars($errors['_']); ?></div><?php endif; ?>
-        <?php if (!empty($errors['image'])): ?><div class="alert alert-danger py-2"><?php echo htmlspecialchars($errors['image']); ?></div><?php endif; ?>
+        <?php if ($errors): ?>
+          <div class="alert alert-danger py-2">
+            <strong>Product was not saved.</strong>
+            <ul class="mb-0 mt-1">
+              <?php foreach (array_unique(array_values($errors)) as $message): ?>
+                <li><?php echo htmlspecialchars((string) $message); ?></li>
+              <?php endforeach; ?>
+            </ul>
+          </div>
+        <?php endif; ?>
 
         <form method="post" enctype="multipart/form-data" novalidate>
           <input type="hidden" name="id" value="<?php echo (int)$editRow['id']; ?>">

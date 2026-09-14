@@ -213,19 +213,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         if ($destination === 'shop') {
             $savedCount = 0;
+            $saveErrors = [];
             foreach ($items as $it) {
                 if (!empty($it['product_id'])) {
                     $curr = $P->find((int) $it['product_id']);
                     if ($curr) {
                         $newQty = (float) $curr['quantity'] + (float) $it['quantity'];
-                        $P->edit((int) $curr['id'], array_merge($curr, [
+                        $pRes = $P->edit((int) $curr['id'], array_merge($curr, [
                             'quantity' => $newQty,
                             'buying_price' => $it['buying_price'] > 0 ? $it['buying_price'] : ($curr['buying_price'] ?? 0),
                             'package_buying_price' => $it['package_buying_price'] ?: ($curr['package_buying_price'] ?? null),
                             'retail_price' => $it['retail_price'] > 0 ? $it['retail_price'] : ($curr['retail_price'] ?? 0),
                             'wholesale_price' => $it['wholesale_price'] > 0 ? $it['wholesale_price'] : ($curr['wholesale_price'] ?? 0),
                         ]));
-                        $savedCount++;
+                        if ($pRes['ok']) {
+                            $savedCount++;
+                        } else {
+                            $saveErrors[] = $it['name'] . ': ' . implode(' ', $pRes['errors'] ?? ['Could not update product.']);
+                        }
+                    } else {
+                        $saveErrors[] = $it['name'] . ': Existing product was not found.';
                     }
                 } else {
                     $pRes = $P->create([
@@ -253,12 +260,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ]);
                     if ($pRes['ok']) {
                         $savedCount++;
+                    } else {
+                        $saveErrors[] = $it['name'] . ': ' . implode(' ', $pRes['errors'] ?? ['Could not save product.']);
                     }
                 }
             }
-            $_SESSION['flash']['success'] = $savedCount . ' product' . ($savedCount === 1 ? '' : 's') . ' saved directly to Shop (Inventory) and ready to sell.';
-            header('Location: ' . public_url('super/inventory/'));
-            exit;
+            if (!$saveErrors) {
+                $_SESSION['flash']['success'] = $savedCount . ' product' . ($savedCount === 1 ? '' : 's') . ' saved directly to Shop (Inventory) and ready to sell.';
+                header('Location: ' . public_url('super/inventory/'));
+                exit;
+            }
+            $error = ($savedCount > 0 ? $savedCount . ' product(s) saved. ' : '')
+                . 'Could not save: ' . implode(' | ', $saveErrors);
         } else {
             $res = $SP->createMany($items, TenantContext::userId());
             if ($res['ok']) {

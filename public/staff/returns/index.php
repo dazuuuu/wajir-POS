@@ -14,21 +14,34 @@ $saleReceiptBase = $isStaffViewer ? public_url('staff/sales/receipt.php') : publ
 
 $error = '';
 $receiptQuery = trim($_GET['receipt'] ?? $_POST['receipt_number'] ?? '');
-$source = $receiptQuery !== '' ? $R->findReceipt($receiptQuery) : null;
+$requestedSourceType = strtolower(trim((string) ($_GET['source_type'] ?? $_POST['source_type'] ?? '')));
+$requestedSourceId = (int) ($_GET['source_id'] ?? $_POST['source_id'] ?? 0);
+$hasExactSource = in_array($requestedSourceType, ['order', 'sale'], true) && $requestedSourceId > 0;
+$source = $hasExactSource
+    ? $R->findSource($requestedSourceType, $requestedSourceId)
+    : ($receiptQuery !== '' ? $R->findReceipt($receiptQuery) : null);
 
 if ($receiptQuery !== '' && !$source) {
     $matches = $R->searchReceipts($receiptQuery, 1);
     if (count($matches) === 1) {
-        $source = $R->findReceipt((string) $matches[0]['receipt_number']);
+        $source = $R->findSource((string) $matches[0]['source_type'], (int) $matches[0]['id']);
     }
     if (!$source) $error = 'No sale found. Scan or enter the receipt / invoice number.';
 }
+
+$sourceUrl = function (array $row) use ($returnsBase): string {
+    return $returnsBase . '?' . http_build_query([
+        'receipt' => $row['receipt_number'],
+        'source_type' => $row['source_type'],
+        'source_id' => (int) $row['id'],
+    ]);
+};
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'return_all' && $source) {
     $res = $R->returnAll((string)$_POST['source_type'], (int)$_POST['source_id'], TenantContext::userId());
     if ($res['ok']) {
         $_SESSION['flash']['success'] = 'Entire sale returned. Stock and sale totals were restored.';
-        header('Location: ' . $returnsBase . '?receipt=' . urlencode($receiptQuery)); exit;
+        header('Location: ' . $sourceUrl($source)); exit;
     }
     $error = $res['error'] ?? 'Could not return this sale.';
 }
@@ -45,7 +58,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'retur
     ], TenantContext::userId());
     if ($res['ok']) {
         $_SESSION['flash']['success'] = 'Product returned. Stock and sale totals were restored.';
-        header('Location: ' . $returnsBase . '?receipt=' . urlencode($receiptQuery));
+        header('Location: ' . $sourceUrl($source));
         exit;
     }
     $error = $res['error'] ?? 'Could not record the return.';
@@ -63,6 +76,8 @@ ob_start();
 <div class="card border-0 shadow-sm mb-4" style="border-radius:14px;">
   <div class="card-body p-4">
     <form method="get" class="row g-2 align-items-end" id="receiptSearchForm">
+      <input type="hidden" name="source_type" id="receiptSourceType" value="<?php echo $hasExactSource ? htmlspecialchars($requestedSourceType) : ''; ?>">
+      <input type="hidden" name="source_id" id="receiptSourceId" value="<?php echo $hasExactSource ? $requestedSourceId : 0; ?>">
       <div class="col-12 col-sm-8">
         <label class="form-label small mb-1 fw-semibold"><i class="fas fa-receipt me-1 text-primary"></i>Scan or enter receipt / invoice</label>
         <div class="position-relative">
@@ -204,6 +219,8 @@ document.querySelectorAll('.return-form').forEach(function (form) {
   var input = document.getElementById('receiptSearchInput');
   var menu = document.getElementById('receiptSuggestMenu');
   var form = document.getElementById('receiptSearchForm');
+  var sourceTypeInput = document.getElementById('receiptSourceType');
+  var sourceIdInput = document.getElementById('receiptSourceId');
   if (!input || !menu || !form) return;
 
   var apiUrl = <?php echo json_encode(public_url('api/returns/search_receipts.php')); ?>;
@@ -276,6 +293,8 @@ document.querySelectorAll('.return-form').forEach(function (form) {
   function chooseItem(item) {
     if (!item || !item.receipt_number) return;
     input.value = item.receipt_number;
+    if (sourceTypeInput) sourceTypeInput.value = item.source_type || '';
+    if (sourceIdInput) sourceIdInput.value = item.id || '';
     menu.style.display = 'none';
     form.submit();
   }
@@ -305,6 +324,8 @@ document.querySelectorAll('.return-form').forEach(function (form) {
   }
 
   input.addEventListener('input', function() {
+    if (sourceTypeInput) sourceTypeInput.value = '';
+    if (sourceIdInput) sourceIdInput.value = '';
     var q = input.value.trim();
     if (!q) {
       menu.style.display = 'none';
@@ -334,9 +355,10 @@ document.querySelectorAll('.return-form').forEach(function (form) {
       activeIndex = (activeIndex - 1 + buttons.length) % buttons.length;
       updateActive();
     } else if (e.key === 'Enter') {
-      if (activeIndex >= 0 && currentItems[activeIndex]) {
+      var selected = activeIndex >= 0 ? currentItems[activeIndex] : currentItems[0];
+      if (selected) {
         e.preventDefault();
-        chooseItem(currentItems[activeIndex]);
+        chooseItem(selected);
       }
     } else if (e.key === 'Escape') {
       menu.style.display = 'none';

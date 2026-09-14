@@ -35,8 +35,13 @@ class ProductModel extends Model
         if ($errors) {
             return ['ok' => false, 'id' => null, 'errors' => $errors];
         }
-        $id = $this->insert($this->columns($in));
-        return ['ok' => true, 'id' => $id, 'errors' => []];
+        try {
+            $id = $this->insert($this->columns($in));
+            return ['ok' => true, 'id' => $id, 'errors' => []];
+        } catch (\PDOException $e) {
+            error_log('ProductModel::create failed: ' . $e->getMessage());
+            return ['ok' => false, 'id' => null, 'errors' => ['_' => 'Could not save this product. Please check its details and try again.']];
+        }
     }
 
     public function edit(int $id, array $in): array
@@ -49,8 +54,13 @@ class ProductModel extends Model
         if ($errors) {
             return ['ok' => false, 'errors' => $errors];
         }
-        $this->update($id, $this->columns($in));
-        return ['ok' => true, 'errors' => []];
+        try {
+            $this->update($id, $this->columns($in));
+            return ['ok' => true, 'errors' => []];
+        } catch (\PDOException $e) {
+            error_log('ProductModel::edit failed: ' . $e->getMessage());
+            return ['ok' => false, 'errors' => ['_' => 'Could not save this product. Please check its details and try again.']];
+        }
     }
 
     /** Assign a system-generated barcode when the product has none yet. */
@@ -494,6 +504,20 @@ class ProductModel extends Model
             )->fetchColumn();
             if ($colType !== '' && stripos($colType, "'product'") === false) {
                 $this->db->exec("ALTER TABLE `products` MODIFY COLUMN `product_type` ENUM('book','stationery','product') NOT NULL DEFAULT 'product'");
+            }
+        } catch (\PDOException $ignored) {
+        }
+        // Categories are optional in the UI and columns() intentionally stores
+        // NULL when none is chosen. Older installations still have the
+        // original NOT NULL definition from migration 020.
+        try {
+            $isNullable = (string) $this->db->query(
+                "SELECT IS_NULLABLE FROM information_schema.COLUMNS
+                  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'products' AND COLUMN_NAME = 'category_id'
+                  LIMIT 1"
+            )->fetchColumn();
+            if (strtoupper($isNullable) === 'NO') {
+                $this->db->exec("ALTER TABLE `products` MODIFY COLUMN `category_id` INT NULL");
             }
         } catch (\PDOException $ignored) {
         }
