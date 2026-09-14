@@ -27,13 +27,13 @@ class Modules
 
     private const ROUTES = [
         'services' => ['/super/services/'],
-        'credit_sales' => ['/orders/', '/invoices/', '/bulk/'],
-        'returns' => ['/returns/'],
-        'inventory' => ['/inventory/', '/store/', '/purchases/', '/suppliers/', '/stationery/', '/stock/', '/publishers/', '/categories/', '/products/'],
-        'customers' => ['/customers/'],
+        'credit_sales' => ['/orders/', '/invoices/', '/bulk/', '/payments/', '/api/orders/'],
+        'returns' => ['/returns/', '/api/returns/'],
+        'inventory' => ['/inventory/', '/store/', '/purchases/', '/suppliers/', '/stationery/', '/stock/', '/publishers/', '/categories/', '/products/', '/grades/', '/subcategories/', '/api/inventory/'],
+        'customers' => ['/customers/', '/api/customers/'],
         'reports' => ['/reports/', '/data/'],
         'documents' => ['/documents/'],
-        'finances' => ['/finances/', '/expenses/', '/taxes/'],
+        'finances' => ['/finances/', '/expenses/', '/revenues/', '/taxes/'],
         'payroll' => ['/payroll/', '/salary/'],
         'commissions' => ['/commissions/'],
         'staff' => ['/super/staff/', '/staff/'],
@@ -119,7 +119,8 @@ class Modules
         if (!TenantContext::check() || TenantContext::tenantId() === null) {
             return;
         }
-        $path = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
+        $path = rawurldecode(parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '');
+        $path = '/' . trim((string) preg_replace('#/+#', '/', $path), '/') . '/';
         if (strpos($path, '/support/') !== false) {
             return;
         }
@@ -139,8 +140,13 @@ class Modules
             $db = $db ?? Database::pdo();
             $value = $db->query("SELECT setting_value FROM site_settings WHERE setting_key = 'support_setup_locked' LIMIT 1")->fetchColumn();
             return (string) $value === '1';
+        } catch (\PDOException $e) {
+            // A missing settings table is expected before the very first
+            // migration. Any other database failure must not reopen a console
+            // that may already have been locked.
+            return ($e->getCode() !== '42S02');
         } catch (\Throwable $e) {
-            return false;
+            return true;
         }
     }
 }

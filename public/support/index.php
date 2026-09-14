@@ -26,6 +26,38 @@ $owner = $setup ? $setup->owner() : null;
 $ownerWasPresent = $owner !== null;
 $fullyAuthenticated = !empty($_SESSION['logged_in']) && !empty($_SESSION['otp_verified']) && TenantContext::check();
 
+// Before an owner exists there is nobody who can authenticate normally.
+// Require a deployment secret so the first person who discovers /support/
+// cannot take ownership of the POS.
+if (!$ownerWasPresent && $pdo) {
+    $expectedSetupToken = (string) getenv('SUPPORT_SETUP_TOKEN');
+    if (strlen($expectedSetupToken) < 16) {
+        http_response_code(503);
+        exit('Set SUPPORT_SETUP_TOKEN to a secret of at least 16 characters, then reload /support/.');
+    }
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'authorize_setup') {
+        if (hash_equals($expectedSetupToken, (string) ($_POST['setup_token'] ?? ''))) {
+            session_regenerate_id(true);
+            $_SESSION['support_setup_authorized'] = true;
+            header('Location: ' . public_url('support/'));
+            exit;
+        }
+        $errors[] = 'Invalid developer setup key.';
+    }
+    if (empty($_SESSION['support_setup_authorized'])) {
+        ?>
+        <!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+        <title>Developer support access</title><style>
+        body{margin:0;background:#f1f5f9;font-family:-apple-system,"Segoe UI",sans-serif;color:#0f172a}.box{max-width:440px;margin:12vh auto;background:#fff;padding:26px;border:1px solid #e2e8f0;border-radius:14px}h1{font-size:1.25rem;margin-top:0}p{color:#64748b;font-size:.88rem}input{width:100%;box-sizing:border-box;padding:10px;border:1px solid #cbd5e1;border-radius:8px;margin:8px 0 14px}button{width:100%;padding:11px;border:0;border-radius:8px;background:#4b006e;color:#fff;font-weight:700}.err{color:#991b1b;font-size:.85rem}
+        </style></head><body><main class="box"><h1>Developer support</h1><p>Enter the one-time setup key configured in <code>SUPPORT_SETUP_TOKEN</code>.</p>
+        <?php foreach ($errors as $accessError): ?><div class="err"><?php echo $h($accessError); ?></div><?php endforeach; ?>
+        <form method="post"><input type="hidden" name="action" value="authorize_setup"><input type="password" name="setup_token" required autofocus autocomplete="off"><button type="submit">Open setup</button></form>
+        </main></body></html>
+        <?php
+        exit;
+    }
+}
+
 if ($ownerWasPresent) {
     if (!$fullyAuthenticated) {
         header('Location: ' . public_url('auth/login.php'));
@@ -67,6 +99,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $setup) {
         } elseif ($action === 'lock' && $ownerWasPresent && $fullyAuthenticated) {
             $setup->lock();
             unset($_SESSION['support_csrf']);
+            unset($_SESSION['support_setup_authorized']);
             header('Location: ' . public_url('super/dashboard/'));
             exit;
         }

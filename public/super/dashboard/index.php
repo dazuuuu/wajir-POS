@@ -118,6 +118,10 @@ $shop = $__tenant['name'] ?? 'your shop';
 $userName = $_SESSION['username'] ?? 'Admin';
 $hour = (int) date('G');
 $greeting = $hour < 12 ? 'Good morning' : ($hour < 17 ? 'Good afternoon' : 'Good evening');
+$dashCreditEnabled = Modules::enabled('credit_sales', $__tenant);
+$dashInventoryEnabled = Modules::enabled('inventory', $__tenant);
+$dashFinancesEnabled = Modules::enabled('finances', $__tenant);
+$dashReportsEnabled = Modules::enabled('reports', $__tenant);
 $chartMax = max(1, max($chartValues));
 $lossBars = array_map(fn($v) => round(max(0, $v * 0.38), 2), $chartValues);
 $limitTarget = max(1, $weekSum['revenue'] + max($weekCogs, $damagedLoss, 1));
@@ -131,13 +135,19 @@ $icon = fn(string $n, int $s = 18) => NavIcons::svg($n, $s);
     <a class="rail-pill active" href="<?php echo public_url('super/dashboard/'); ?>" title="Overview"><?php echo $icon('overview'); ?></a>
     <a class="rail-pill" href="<?php echo public_url('super/shop/'); ?>" title="Shop"><?php echo $icon('shop'); ?></a>
     <a class="rail-pill" href="<?php echo public_url('super/sales/'); ?>" title="Sales"><?php echo $icon('sales'); ?></a>
+    <?php if ($dashCreditEnabled): ?>
     <a class="rail-pill" href="<?php echo public_url('super/invoices/'); ?>" title="Invoices"><?php echo $icon('invoices'); ?></a>
     <a class="rail-pill" href="<?php echo public_url('super/payments/'); ?>" title="Payments"><?php echo $icon('payments'); ?></a>
+    <?php endif; ?>
+    <?php if ($dashInventoryEnabled): ?>
     <a class="rail-pill" href="<?php echo public_url('super/inventory/'); ?>" title="Inventory"><?php echo $icon('inventory'); ?></a>
     <a class="rail-pill" href="<?php echo public_url('super/store/'); ?>" title="Store"><?php echo $icon('store'); ?></a>
+    <a class="rail-pill" href="<?php echo public_url('super/stock/new.php'); ?>" title="Record stock"><?php echo $icon('stock'); ?></a>
+    <?php endif; ?>
+    <?php if ($dashFinancesEnabled): ?>
     <a class="rail-pill" href="<?php echo public_url('super/expenses/'); ?>" title="Expenses"><?php echo $icon('expenses'); ?></a>
     <a class="rail-pill" href="<?php echo public_url('super/finances/'); ?>" title="Finances"><?php echo $icon('finances'); ?></a>
-    <a class="rail-pill" href="<?php echo public_url('super/stock/new.php'); ?>" title="Record stock"><?php echo $icon('stock'); ?></a>
+    <?php endif; ?>
     <a class="rail-pill" href="<?php echo public_url('super/settings/'); ?>" title="Settings"><?php echo $icon('settings'); ?></a>
     <span class="rail-spacer"></span>
     <a class="rail-pill" href="<?php echo public_url('auth/logout.php'); ?>" title="Logout"><?php echo $icon('logout'); ?></a>
@@ -148,14 +158,14 @@ $icon = fn(string $n, int $s = 18) => NavIcons::svg($n, $s);
       <div class="fin-tabs">
         <a class="tab active" href="<?php echo public_url('super/dashboard/'); ?>">Overview</a>
         <a class="tab" href="<?php echo public_url('super/sales/'); ?>">Activity</a>
-        <a class="tab" href="<?php echo public_url('super/inventory/'); ?>">Manage</a>
-        <a class="tab" href="<?php echo public_url('super/stock/new.php'); ?>">Program</a>
+        <?php if ($dashInventoryEnabled): ?><a class="tab" href="<?php echo public_url('super/inventory/'); ?>">Manage</a>
+        <a class="tab" href="<?php echo public_url('super/stock/new.php'); ?>">Program</a><?php endif; ?>
         <a class="tab" href="<?php echo public_url('super/settings/'); ?>">Account</a>
-        <a class="tab" href="<?php echo public_url('super/reports/'); ?>">Reports</a>
+        <?php if ($dashReportsEnabled): ?><a class="tab" href="<?php echo public_url('super/reports/'); ?>">Reports</a><?php endif; ?>
       </div>
       <div class="head-actions">
         <a class="circle-btn" href="<?php echo public_url('super/sales/'); ?>" title="Search sales"><?php echo $icon('search', 16); ?></a>
-        <a class="circle-btn" href="<?php echo public_url('super/inventory/low-stock.php'); ?>" title="Alerts"><?php echo $icon('bell', 16); ?></a>
+        <?php if ($dashInventoryEnabled): ?><a class="circle-btn" href="<?php echo public_url('super/inventory/low-stock.php'); ?>" title="Alerts"><?php echo $icon('bell', 16); ?></a><?php endif; ?>
         <div class="profile-chip">
           <span class="avatar"><?php echo strtoupper(substr($userName, 0, 1)); ?></span>
           <span><strong><?php echo htmlspecialchars($userName); ?></strong><small><?php echo htmlspecialchars($shop); ?></small></span>
@@ -176,18 +186,18 @@ $icon = fn(string $n, int $s = 18) => NavIcons::svg($n, $s);
         <div class="delta good"><?php echo $icon('arrow-up', 12); ?><?php echo $todaySum['count']; ?> sale<?php echo $todaySum['count'] === 1 ? '' : 's'; ?> today</div>
         <div class="balance-actions">
           <a class="dark-action" href="<?php echo public_url('super/shop/'); ?>"><?php echo $icon('transfer', 14); ?> Sell</a>
-          <a class="light-action" href="<?php echo public_url('super/stock/new.php'); ?>"><?php echo $icon('plus', 14); ?> Stock</a>
+          <?php if ($dashInventoryEnabled): ?><a class="light-action" href="<?php echo public_url('super/stock/new.php'); ?>"><?php echo $icon('plus', 14); ?> Stock</a><?php endif; ?>
         </div>
         <div class="wallets">
           <div class="wallet"><span>Today</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($todaySum['revenue'], 0); ?></strong><small>Active</small></div>
-          <div class="wallet"><span>Credit owed</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($dashCreditOwed, 0); ?></strong><small><?php echo count($openTabs); ?> invoice<?php echo count($openTabs) === 1 ? '' : 's'; ?></small></div>
-          <div class="wallet"><span>Low stock</span><strong><?php echo count($lowStock); ?></strong><small><?php echo $lowStock ? 'Review' : 'Clear'; ?></small></div>
+          <?php if ($dashCreditEnabled): ?><div class="wallet"><span>Credit owed</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($dashCreditOwed, 0); ?></strong><small><?php echo count($openTabs); ?> invoice<?php echo count($openTabs) === 1 ? '' : 's'; ?></small></div><?php endif; ?>
+          <?php if ($dashInventoryEnabled): ?><div class="wallet"><span>Low stock</span><strong><?php echo count($lowStock); ?></strong><small><?php echo $lowStock ? 'Review' : 'Clear'; ?></small></div><?php endif; ?>
         </div>
       </section>
 
       <section class="metric-grid">
         <article class="metric hot"><span>Total Earnings</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($todaySum['revenue'], 0); ?></strong><small><?php echo $icon('arrow-up', 11); ?> Today</small></article>
-        <article class="metric"><span>Credit sales owed</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($dashCreditOwed, 0); ?></strong><small><?php echo $icon('invoice-dollar', 12); ?> <?php echo count($openTabs); ?> open</small></article>
+        <?php if ($dashCreditEnabled): ?><article class="metric"><span>Credit sales owed</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($dashCreditOwed, 0); ?></strong><small><?php echo $icon('invoice-dollar', 12); ?> <?php echo count($openTabs); ?> open</small></article><?php endif; ?>
         <article class="metric"><span>Sales Revenue</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($weekSum['revenue'], 0); ?></strong><small><?php echo $icon('arrow-up', 11); ?> This week</small></article>
         <article class="metric"><span>Extra charges today</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($todayExtraCharges, 0); ?></strong><small><?php echo $icon('arrow-up', 11); ?> Pure profit</small></article>
         <article class="metric <?php echo $profitAfterLoss < 0 ? 'danger' : ''; ?>"><span>Net Profit</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($profitAvailable ? $profitAfterLoss : 0, 0); ?></strong><small><?php echo $icon('chart', 12); ?> After losses</small></article>
@@ -276,13 +286,13 @@ $icon = fn(string $n, int $s = 18) => NavIcons::svg($n, $s);
         <div class="limit-row"><span><?php echo htmlspecialchars($currency); ?> <?php echo number_format($weekCogs, 0); ?> spent out of</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($limitTarget, 0); ?></strong></div>
       </section>
 
-      <section class="panel card-panel">
+      <?php if ($dashCreditEnabled): ?><section class="panel card-panel">
         <div class="panel-title-row"><h2>My Cards</h2><a href="<?php echo public_url('super/payments/'); ?>">+ Add new</a></div>
         <div class="card-strip">
           <div class="pay-card dark"><span>Active</span><strong><?php echo htmlspecialchars($shop); ?></strong><small>**** **** <?php echo str_pad((string) TenantContext::tenantId(), 4, '0', STR_PAD_LEFT); ?></small></div>
           <div class="pay-card violet"><span>Active</span><strong><?php echo htmlspecialchars($currency); ?></strong><small>**** **** <?php echo date('md'); ?></small></div>
         </div>
-      </section>
+      </section><?php endif; ?>
 
       <section class="panel activity-panel">
         <div class="panel-title-row">

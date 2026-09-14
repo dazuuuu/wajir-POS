@@ -110,10 +110,17 @@ class SetupService
             return ['ok' => false, 'error' => 'That email is already registered.'];
         }
 
-        Modules::ensureSchema($this->db);
-        $tenantModel = new Models\TenantModel($this->db);
-        $this->db->beginTransaction();
+        $lockAcquired = (int) $this->db->query("SELECT GET_LOCK('wajir_pos_owner_setup', 10)")->fetchColumn() === 1;
+        if (!$lockAcquired) {
+            return ['ok' => false, 'error' => 'Another setup request is running. Try again.'];
+        }
         try {
+            if ($this->owner()) {
+                return ['ok' => false, 'error' => 'A primary owner already exists.'];
+            }
+            Modules::ensureSchema($this->db);
+            $tenantModel = new Models\TenantModel($this->db);
+            $this->db->beginTransaction();
             $roleId = (int) $this->db->query("SELECT id FROM roles WHERE role_name = 'tenant_owner' LIMIT 1")->fetchColumn();
             if ($roleId <= 0) {
                 throw new RuntimeException('The tenant_owner role is missing.');
@@ -139,6 +146,11 @@ class SetupService
             }
             error_log('SetupService::createOwner failed: ' . $e->getMessage());
             return ['ok' => false, 'error' => 'Could not create the owner account: ' . $e->getMessage()];
+        } finally {
+            try {
+                $this->db->query("SELECT RELEASE_LOCK('wajir_pos_owner_setup')");
+            } catch (Throwable $ignored) {
+            }
         }
     }
 
