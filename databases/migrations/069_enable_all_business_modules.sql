@@ -16,3 +16,7 @@ UPDATE tenants
         AND JSON_CONTAINS(enabled_modules, JSON_QUOTE('reports')) = 1
         AND JSON_CONTAINS(enabled_modules, JSON_QUOTE('documents')) = 1
     );
+
+UPDATE tenants
+   SET product_commission_enabled = 1
+ WHERE JSON_CONTAINS(enabled_modules, JSON_QUOTE('commissions')) = 1;

@@ -21,10 +21,6 @@ class Modules
         'staff' => ['label' => 'Staff management', 'description' => 'Staff accounts, permissions, attendance and staff login.'],
     ];
 
-    private const LEGACY_DEFAULT = [
-        'credit_sales', 'returns', 'inventory', 'customers', 'reports', 'documents',
-    ];
-
     private const ROUTES = [
         'services' => ['/super/services/'],
         'credit_sales' => ['/orders/', '/invoices/', '/bulk/', '/payments/', '/api/orders/'],
@@ -56,7 +52,7 @@ class Modules
         return array_values(array_intersect(array_keys(self::DEFINITIONS), array_map('strval', $modules)));
     }
 
-    /** Resolve stored settings, upgrading the former default to all features. */
+    /** Resolve stored settings; NULL means the owner has not chosen yet. */
     public static function selection($raw): array
     {
         if ($raw === null || $raw === '') {
@@ -66,11 +62,7 @@ class Modules
         if (!is_array($selected)) {
             return [];
         }
-        $selected = self::sanitize($selected);
-        $legacy = self::LEGACY_DEFAULT;
-        sort($selected);
-        sort($legacy);
-        return $selected === $legacy ? self::defaultSelection() : $selected;
+        return self::sanitize($selected);
     }
 
     public static function enabled(string $module, ?array $tenant = null): bool
