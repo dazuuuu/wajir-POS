@@ -1148,6 +1148,10 @@ class OrderModel extends Model
 
     private function ensurePaymentSchema(): void
     {
+        // Dashboard and invoice queries always join this table. Migration 044
+        // may be missing on an upgraded install, so create it before any query
+        // can fail with SQLSTATE[42S02].
+        CustomerModel::ensureTableExists($this->db);
         $this->ensureColumn('orders', 'customer_id', "ALTER TABLE orders ADD COLUMN customer_id INT NULL AFTER customer_email");
         $this->ensureColumn('orders', 'sale_type', "ALTER TABLE orders ADD COLUMN sale_type ENUM('retail','wholesale') NOT NULL DEFAULT 'retail' AFTER channel");
         $this->ensureColumn('order_items', 'price_type', "ALTER TABLE order_items ADD COLUMN price_type ENUM('retail','wholesale') NOT NULL DEFAULT 'retail' AFTER unit_price");
