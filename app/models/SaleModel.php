@@ -399,7 +399,7 @@ class SaleModel extends Model
               LEFT JOIN (
                         SELECT tenant_id, source_item_id, SUM(returned_quantity) AS returned_quantity
                           FROM product_returns
-                         WHERE source_type = 'sale'
+                         WHERE source_type = 'sale' AND undone_at IS NULL
                       GROUP BY tenant_id, source_item_id
                    ) ret ON ret.tenant_id = si.tenant_id AND ret.source_item_id = si.id
                   WHERE si.sale_id = ? AND si.tenant_id = ?"
@@ -721,8 +721,8 @@ class SaleModel extends Model
                                ELSE GREATEST(si.quantity - COALESCE(ret.returned_quantity,0), 0) * COALESCE(p.`{$costCol}`, 0)
                            END
                        ) AS cost,
-                       SUM(CASE WHEN si.price_type = 'retail' THEN si.line_total ELSE 0 END)
-                       - SUM(CASE WHEN si.price_type = 'retail' THEN GREATEST(si.quantity - COALESCE(ret.returned_quantity,0), 0) * COALESCE(p.`{$costCol}`, 0) ELSE 0 END) AS retail_profit,
+                       SUM(CASE WHEN si.price_type IN ('retail','retail_pack') THEN si.line_total ELSE 0 END)
+                       - SUM(CASE WHEN si.price_type IN ('retail','retail_pack') THEN GREATEST(si.quantity - COALESCE(ret.returned_quantity,0), 0) * COALESCE(p.`{$costCol}`, 0) ELSE 0 END) AS retail_profit,
                        SUM(CASE WHEN si.price_type = 'wholesale' THEN si.line_total ELSE 0 END)
                        - SUM(CASE WHEN si.price_type = 'wholesale' THEN
                            CASE
@@ -739,7 +739,7 @@ class SaleModel extends Model
              LEFT JOIN (
                     SELECT tenant_id, source_item_id, SUM(returned_quantity) AS returned_quantity
                       FROM product_returns
-                     WHERE source_type = 'sale'
+                     WHERE source_type = 'sale' AND undone_at IS NULL
                   GROUP BY tenant_id, source_item_id
              ) ret ON ret.tenant_id = si.tenant_id AND ret.source_item_id = si.id
                  WHERE si.tenant_id = ? AND s.status <> 'voided' {$periodSql}

@@ -1341,7 +1341,7 @@ class OrderModel extends Model
               LEFT JOIN (
                         SELECT tenant_id, source_item_id, SUM(returned_quantity) AS returned_quantity
                           FROM product_returns
-                         WHERE source_type = 'order'
+                         WHERE source_type = 'order' AND undone_at IS NULL
                       GROUP BY tenant_id, source_item_id
                    ) ret ON ret.tenant_id = oi.tenant_id AND ret.source_item_id = oi.id
                   WHERE oi.order_id = ? AND oi.tenant_id = ?"
@@ -1976,7 +1976,7 @@ class OrderModel extends Model
           LEFT JOIN (
                     SELECT tenant_id, source_item_id, SUM(returned_quantity) AS returned_quantity
                       FROM product_returns
-                     WHERE source_type = 'order'
+                     WHERE source_type = 'order' AND undone_at IS NULL
                   GROUP BY tenant_id, source_item_id
                ) ret ON ret.tenant_id = oi.tenant_id AND ret.source_item_id = oi.id
               WHERE oi.tenant_id = ? AND o.status IN ('paid','open') AND COALESCE(o.total,0) > 0
@@ -2017,8 +2017,8 @@ class OrderModel extends Model
                                ELSE GREATEST(oi.quantity - COALESCE(ret.returned_quantity,0), 0) * COALESCE(p.`{$costCol}`, 0) * {$paidRatio}
                            END
                        ) AS cost,
-                       SUM(CASE WHEN oi.price_type = 'retail' THEN oi.line_total * {$paidRatio} ELSE 0 END)
-                       - SUM(CASE WHEN oi.price_type = 'retail' THEN GREATEST(oi.quantity - COALESCE(ret.returned_quantity,0), 0) * COALESCE(p.`{$costCol}`, 0) * {$paidRatio} ELSE 0 END) AS retail_profit,
+                       SUM(CASE WHEN oi.price_type IN ('retail','retail_pack') THEN oi.line_total * {$paidRatio} ELSE 0 END)
+                       - SUM(CASE WHEN oi.price_type IN ('retail','retail_pack') THEN GREATEST(oi.quantity - COALESCE(ret.returned_quantity,0), 0) * COALESCE(p.`{$costCol}`, 0) * {$paidRatio} ELSE 0 END) AS retail_profit,
                        SUM(CASE WHEN oi.price_type = 'wholesale' THEN oi.line_total * {$paidRatio} ELSE 0 END)
                        - SUM(CASE WHEN oi.price_type = 'wholesale' THEN
                            CASE
@@ -2042,7 +2042,7 @@ class OrderModel extends Model
              LEFT JOIN (
                     SELECT tenant_id, source_item_id, SUM(returned_quantity) AS returned_quantity
                       FROM product_returns
-                     WHERE source_type = 'order'
+                     WHERE source_type = 'order' AND undone_at IS NULL
                   GROUP BY tenant_id, source_item_id
              ) ret ON ret.tenant_id = oi.tenant_id AND ret.source_item_id = oi.id
                  WHERE oi.tenant_id = ? AND o.status IN ('paid','open') AND COALESCE(o.total,0) > 0

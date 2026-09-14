@@ -2,7 +2,7 @@
 
 class SetupService
 {
-    private const SCHEMA_VERSION = '1';
+    private const SCHEMA_VERSION = '2';
 
     private PDO $db;
 

@@ -13,6 +13,12 @@ $receiptBase = $isStaffViewer ? public_url('staff/orders/receipt.php') : public_
 $saleReceiptBase = $isStaffViewer ? public_url('staff/sales/receipt.php') : public_url('super/sales/receipt.php');
 
 $error = '';
+$recentQuery = trim((string) ($_GET['return_q'] ?? ''));
+$canUndoReturns = TenantContext::role() === 'tenant_owner' || TenantContext::can(Capabilities::INVENTORY_EDIT);
+if (empty($_SESSION['returns_csrf'])) {
+    $_SESSION['returns_csrf'] = bin2hex(random_bytes(24));
+}
+$returnsCsrf = $_SESSION['returns_csrf'];
 $receiptQuery = trim($_GET['receipt'] ?? $_POST['receipt_number'] ?? '');
 $requestedSourceType = strtolower(trim((string) ($_GET['source_type'] ?? $_POST['source_type'] ?? '')));
 $requestedSourceId = (int) ($_GET['source_id'] ?? $_POST['source_id'] ?? 0);
@@ -36,6 +42,22 @@ $sourceUrl = function (array $row) use ($returnsBase): string {
         'source_id' => (int) $row['id'],
     ]);
 };
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'undo_return') {
+    if (!$canUndoReturns) {
+        $error = 'You do not have permission to undo inventory returns.';
+    } elseif (!hash_equals($returnsCsrf, (string) ($_POST['csrf'] ?? ''))) {
+        $error = 'This undo request expired. Reload the page and try again.';
+    } else {
+        $res = $R->undo((int) ($_POST['return_id'] ?? 0), TenantContext::userId());
+        if ($res['ok']) {
+            $_SESSION['flash']['success'] = 'Return undone. Inventory and the original sale were restored.';
+            header('Location: ' . $returnsBase . ($recentQuery !== '' ? '?return_q=' . urlencode($recentQuery) : ''));
+            exit;
+        }
+        $error = $res['error'] ?? 'Could not undo this return.';
+    }
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'return_all' && $source) {
     $res = $R->returnAll((string)$_POST['source_type'], (int)$_POST['source_id'], TenantContext::userId());
@@ -65,7 +87,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'retur
 }
 
 $items = $source ? $R->receiptItems($source['source_type'], (int) $source['id']) : [];
-$recent = $R->recent(80);
+$recent = $R->recent(250, $recentQuery);
 $page_title = 'Returns';
 ob_start();
 ?>
@@ -177,23 +199,45 @@ ob_start();
 
 <div class="card border-0 shadow-sm" style="border-radius:14px;">
   <div class="card-body p-4">
-    <h2 class="h6 fw-bold mb-3"><i class="fas fa-clock-rotate-left me-2 text-primary"></i>Recent returns</h2>
+    <div class="d-flex justify-content-between align-items-end gap-3 flex-wrap mb-3">
+      <div>
+        <h2 class="h6 fw-bold mb-1"><i class="fas fa-clock-rotate-left me-2 text-primary"></i>Recent returns</h2>
+        <div class="text-muted small">Search and scroll through up to 250 active return records.</div>
+      </div>
+      <form method="get" class="d-flex gap-2" style="min-width:min(100%,360px);">
+        <input type="search" name="return_q" class="form-control form-control-sm" value="<?php echo htmlspecialchars($recentQuery); ?>" placeholder="Receipt, product, reason or staff">
+        <button class="btn btn-sm btn-outline-primary"><i class="fas fa-search"></i></button>
+        <?php if ($recentQuery !== ''): ?><a class="btn btn-sm btn-outline-secondary" href="<?php echo $returnsBase; ?>">Clear</a><?php endif; ?>
+      </form>
+    </div>
     <?php if (!$recent): ?>
-      <div class="text-muted small">No returns recorded yet.</div>
+      <div class="text-muted small"><?php echo $recentQuery !== '' ? 'No returns match that search.' : 'No returns recorded yet.'; ?></div>
     <?php else: ?>
-      <div class="table-responsive">
+      <div class="table-responsive" style="max-height:460px;overflow:auto;border:1px solid #eef0f4;border-radius:10px;">
         <table class="table table-sm align-middle mb-0">
-          <thead><tr class="text-muted small text-uppercase"><th>Receipt</th><th>Product</th><th>Returned</th><th>Used</th><th>Restocked</th><th>By</th><th>When</th></tr></thead>
+          <thead class="sticky-top bg-white"><tr class="text-muted small text-uppercase"><th>Receipt</th><th>Product</th><th>Returned</th><th>Used</th><th>Restocked</th><th>By</th><th>When</th><th>Action</th></tr></thead>
           <tbody>
             <?php foreach ($recent as $r): ?>
             <tr>
-              <td class="fw-semibold small"><?php echo htmlspecialchars($r['receipt_number']); ?></td>
+              <td class="fw-semibold small"><a href="<?php echo $returnsBase . '?' . http_build_query(['receipt' => $r['receipt_number'], 'source_type' => $r['source_type'], 'source_id' => (int) $r['source_id']]); ?>"><?php echo htmlspecialchars($r['receipt_number']); ?></a></td>
               <td class="small"><?php echo htmlspecialchars($r['product_name']); ?></td>
               <td class="small"><?php echo rtrim(rtrim(number_format((float) $r['returned_quantity'], 2), '0'), '.'); ?></td>
               <td class="small"><?php echo rtrim(rtrim(number_format((float) $r['used_quantity'], 2), '0'), '.'); ?></td>
               <td class="small"><?php echo rtrim(rtrim(number_format((float) $r['restocked_quantity'], 2), '0'), '.'); ?></td>
               <td class="small"><?php echo htmlspecialchars($r['processed_by_name'] ?? '—'); ?></td>
               <td class="small text-nowrap"><?php echo date('j M, g:i a', strtotime($r['created_at'])); ?></td>
+              <td class="small">
+                <?php if ($canUndoReturns): ?>
+                  <form method="post" onsubmit="return confirm('Undo this return and restore it to the original sale?');">
+                    <input type="hidden" name="action" value="undo_return">
+                    <input type="hidden" name="return_id" value="<?php echo (int) $r['id']; ?>">
+                    <input type="hidden" name="csrf" value="<?php echo htmlspecialchars($returnsCsrf); ?>">
+                    <button class="btn btn-sm btn-outline-danger text-nowrap"><i class="fas fa-rotate-right me-1"></i>Undo</button>
+                  </form>
+                <?php else: ?>
+                  <span class="text-muted">—</span>
+                <?php endif; ?>
+              </td>
             </tr>
             <?php endforeach; ?>
           </tbody>

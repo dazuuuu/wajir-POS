@@ -55,7 +55,7 @@ class SalesReport
           LEFT JOIN (
                     SELECT tenant_id, source_item_id, SUM(returned_quantity) AS returned_quantity
                       FROM product_returns
-                     WHERE source_type = 'sale'
+                     WHERE source_type = 'sale' AND undone_at IS NULL
                   GROUP BY tenant_id, source_item_id
                ) ret ON ret.tenant_id = si.tenant_id AND ret.source_item_id = si.id
               WHERE si.tenant_id = ? AND s.status = 'completed' AND DATE(s.created_at) = ?
