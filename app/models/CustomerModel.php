@@ -103,7 +103,7 @@ class CustomerModel extends Model
         return $st->fetchAll();
     }
 
-    public function adjustPoints(int $customerId, float $points, string $reason, ?int $orderId = null, ?int $createdBy = null): bool
+    public function adjustPoints(int $customerId, float $points, string $reason, ?int $orderId = null, ?int $createdBy = null, bool $allowNegative = false): bool
     {
         $tid = \TenantContext::tenantId();
         $cust = $this->find($customerId);
@@ -111,7 +111,7 @@ class CustomerModel extends Model
             return false;
         }
         $new = round((float) $cust['loyalty_points'] + $points, 2);
-        if ($new < 0) {
+        if ($new < 0 && !$allowNegative) {
             return false;
         }
         // Do not nest transactions — markPaid may already be inside one.

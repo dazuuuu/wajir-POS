@@ -65,7 +65,9 @@ function clean_fetch_sales(PDO $pdo, int $tenantId): array
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
-    if ($action === 'repair_paid') {
+    if (!hash_equals($cleanCsrf, (string) ($_POST['csrf'] ?? ''))) {
+        $error = 'This request expired. Reload the page and try again.';
+    } elseif ($action === 'repair_paid') {
         try {
             $pdo->beginTransaction();
             $repairedOrderIds = [];
@@ -197,6 +199,7 @@ ob_start();
   <div class="d-flex gap-2 flex-wrap">
     <form method="post" onsubmit="return confirm('Clear all credit-sale banner alerts? This only hides alerts, not invoices.');">
       <input type="hidden" name="action" value="clear_credit_alerts">
+      <input type="hidden" name="csrf" value="<?php echo htmlspecialchars($cleanCsrf); ?>">
       <button class="btn btn-sm btn-outline-warning">Clear banner alerts</button>
     </form>
     <a class="btn btn-sm btn-outline-secondary" href="<?php echo public_url('super/dashboard/'); ?>">Dashboard</a>
@@ -214,6 +217,7 @@ ob_start();
     </div>
     <form method="post" onsubmit="return confirm('Delete ALL invoice documents you generated or sold? Products and sales will not be deleted.');">
       <input type="hidden" name="action" value="delete_all_invoice_documents">
+      <input type="hidden" name="csrf" value="<?php echo htmlspecialchars($cleanCsrf); ?>">
       <button class="btn btn-sm btn-outline-danger" <?php echo $myInvoices ? '' : 'disabled'; ?>>Delete all my invoices</button>
     </form>
   </div>
@@ -238,6 +242,7 @@ ob_start();
               <form method="post" class="d-inline" onsubmit="return confirm('Delete this invoice document only? Products and sales will not be deleted.');">
                 <input type="hidden" name="action" value="delete_invoice_document">
                 <input type="hidden" name="order_id" value="<?php echo (int) $inv['id']; ?>">
+                <input type="hidden" name="csrf" value="<?php echo htmlspecialchars($cleanCsrf); ?>">
                 <button class="btn btn-sm btn-outline-danger">Delete invoice</button>
               </form>
               <form method="post" class="d-inline" onsubmit="return confirm('Undo this entire sale? Sold quantities will return to stock and the payment will be removed from financial totals. Products will NOT be deleted.');">
@@ -260,6 +265,7 @@ ob_start();
     <p class="text-muted small mb-3">Marks zero-balance open credit invoices as paid, so they stop showing as pending.</p>
     <form method="post" onsubmit="return confirm('Repair zero-balance paid records now?');">
       <input type="hidden" name="action" value="repair_paid">
+      <input type="hidden" name="csrf" value="<?php echo htmlspecialchars($cleanCsrf); ?>">
       <button class="btn btn-primary">Repair paid records</button>
     </form>
   </div>
@@ -273,6 +279,7 @@ ob_start();
     </div>
     <form method="post" onsubmit="return confirm('Clear all credit-sale banner alerts?');">
       <input type="hidden" name="action" value="clear_credit_alerts">
+      <input type="hidden" name="csrf" value="<?php echo htmlspecialchars($cleanCsrf); ?>">
       <button class="btn btn-sm btn-outline-warning">Clear all alerts</button>
     </form>
   </div>

@@ -63,6 +63,43 @@ class ProductModel extends Model
         }
     }
 
+    /** Atomically add stock while applying the submitted product/pricing fields. */
+    public function restock(int $id, float $quantityToAdd, array $in): array
+    {
+        $row = $this->find($id);
+        $tid = \TenantContext::tenantId();
+        if (!$row || (int) ($row['tenant_id'] ?? 0) !== (int) $tid) {
+            return ['ok' => false, 'errors' => ['_' => 'Product not found.']];
+        }
+        if ($quantityToAdd < 0) {
+            return ['ok' => false, 'errors' => ['quantity' => 'Enter a valid quantity to add.']];
+        }
+        $this->normalizeInputs($in, false);
+        $errors = $this->validate($in + ['id' => $id]);
+        if ($errors) {
+            return ['ok' => false, 'errors' => $errors];
+        }
+        try {
+            $data = $this->columns($in);
+            unset($data['quantity']);
+            $sets = ['quantity = quantity + ?'];
+            $params = [$quantityToAdd];
+            foreach ($data as $column => $value) {
+                $sets[] = "`{$column}` = ?";
+                $params[] = $value;
+            }
+            $params[] = $id;
+            $params[] = $tid;
+            $this->db->prepare(
+                'UPDATE products SET ' . implode(', ', $sets) . ' WHERE id = ? AND tenant_id = ?'
+            )->execute($params);
+            return ['ok' => true, 'errors' => []];
+        } catch (\PDOException $e) {
+            error_log('ProductModel::restock failed: ' . $e->getMessage());
+            return ['ok' => false, 'errors' => ['_' => 'Could not add this stock. Please try again.']];
+        }
+    }
+
     /** Assign a system-generated barcode when the product has none yet. */
     public function assignBarcode(int $id): ?string
     {

@@ -137,9 +137,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if ($destination === 'shop') {
                 if ($existing) {
-                    $newQty = (float) $existing['quantity'] + $qty;
-                    $P->edit((int) $existing['id'], array_merge($existing, [
-                        'quantity' => $newQty,
+                    $saveRes = $P->restock((int) $existing['id'], $qty, array_merge($existing, [
                         'buying_price' => $unitBuying > 0 ? $unitBuying : ($existing['buying_price'] ?? 0),
                         'package_buying_price' => $buyingPrice > 0 ? $buyingPrice : ($existing['package_buying_price'] ?? null),
                         'retail_price' => $sellingPrice > 0 ? $sellingPrice : ($existing['retail_price'] ?? 0),
@@ -150,7 +148,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'retail_pack_price' => $retailPackPrice > 0 ? $retailPackPrice : ($existing['retail_pack_price'] ?? null),
                     ]));
                 } else {
-                    $P->create([
+                    $saveRes = $P->create([
                         'name' => $name,
                         'category_id' => !empty($_POST['category']) ? (int) $C->findOrCreate($_POST['category'], 'product') : null,
                         'brand_id' => !empty($_POST['brand']) ? (int) $BA->findOrCreate('brand', $_POST['brand']) : null,
@@ -174,9 +172,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'description' => $lineNotes ?: null,
                     ]);
                 }
-                $_SESSION['flash']['success'] = 'Product "' . htmlspecialchars($name) . '" saved directly to Shop (Inventory) and ready to sell.';
-                header('Location: ' . public_url('super/inventory/'));
-                exit;
+                if ($saveRes['ok']) {
+                    $_SESSION['flash']['success'] = 'Product "' . htmlspecialchars($name) . '" saved directly to Shop (Inventory) and ready to sell.';
+                    header('Location: ' . public_url('super/inventory/'));
+                    exit;
+                }
+                $error = implode(' ', array_values($saveRes['errors'] ?? ['Could not save this product.']));
             } else {
                 if ($existing) {
                     $items = [[

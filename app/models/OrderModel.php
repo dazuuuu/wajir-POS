@@ -1373,11 +1373,15 @@ class OrderModel extends Model
 
             if (!empty($order['customer_id']) && (float) $order['loyalty_points_earned'] > 0) {
                 $customerModel = new CustomerModel($db);
-                $customer = $customerModel->find((int) $order['customer_id']);
-                $available = max(0, (float) ($customer['loyalty_points'] ?? 0));
-                $reverse = min($available, (float) $order['loyalty_points_earned']);
-                if ($reverse > 0) {
-                    $customerModel->adjustPoints((int) $order['customer_id'], -$reverse, 'Sale deleted and stock restored', $orderId, $staffId);
+                if (!$customerModel->adjustPoints(
+                    (int) $order['customer_id'],
+                    -(float) $order['loyalty_points_earned'],
+                    'Sale deleted and stock restored',
+                    $orderId,
+                    $staffId,
+                    true
+                )) {
+                    throw new \RuntimeException('Could not reverse loyalty points for the deleted sale.');
                 }
             }
 

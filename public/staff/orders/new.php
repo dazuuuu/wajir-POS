@@ -143,7 +143,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $depositNote = '';
             $depositOk = true;
             if ($openingDeposit > 0) {
-                $deposit = min($openingDeposit, max(0, round($subtotal - $discount + $additionalCharges, 2)));
+                $freshOpened = $orderModel->find((int) $res['order_id']);
+                $deposit = min($openingDeposit, max(0, round((float) ($freshOpened['total'] ?? 0), 2)));
                 $payment = $orderModel->markPaid((int) $res['order_id'], [
                     'method' => 'credit',
                     'deposit_method' => $openingDepositMethod,
@@ -151,14 +152,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'amount_tendered' => $openingDepositMethod === 'cash' ? $deposit : null,
                 ], TenantContext::userId());
                 if ($payment['ok']) {
-                    $depositNote = ' Opening deposit of KES ' . number_format($deposit, 2) . ' recorded by ' . ($depositMethods[$openingDepositMethod] ?? $openingDepositMethod) . '.';
+                    $recordedDeposit = (float) ($payment['amount_paid_now'] ?? $deposit);
+                    $depositNote = ' Opening deposit of KES ' . number_format($recordedDeposit, 2) . ' recorded by ' . ($depositMethods[$openingDepositMethod] ?? $openingDepositMethod) . '.';
                 } else {
                     $reverted = $orderModel->deleteSale((int) $res['order_id'], TenantContext::userId());
                     if ($reverted['ok']) {
                         $depositOk = false;
                         $error = 'The credit sale was cancelled and its stock restored because the opening deposit could not be recorded. Please try again.';
                     } else {
-                        $depositNote = ' The credit sale was opened, but its deposit was not recorded. Record it from Payments immediately.';
+                        $_SESSION['flash']['error'] = 'The credit sale exists, but its opening deposit failed and automatic cancellation also failed. Do not collect it twice; record the payment from this invoice now.';
+                        header('Location: ' . $ordersViewBase . '?id=' . $res['order_id']);
+                        exit;
                     }
                 }
             }

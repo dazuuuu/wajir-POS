@@ -222,9 +222,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (!empty($it['product_id'])) {
                     $curr = $P->find((int) $it['product_id']);
                     if ($curr) {
-                        $newQty = (float) $curr['quantity'] + (float) $it['quantity'];
-                        $pRes = $P->edit((int) $curr['id'], array_merge($curr, [
-                            'quantity' => $newQty,
+                        $pRes = $P->restock((int) $curr['id'], (float) $it['quantity'], array_merge($curr, [
                             'buying_price' => $it['buying_price'] > 0 ? $it['buying_price'] : ($curr['buying_price'] ?? 0),
                             'package_buying_price' => $it['package_buying_price'] ?: ($curr['package_buying_price'] ?? null),
                             'retail_price' => $it['retail_price'] > 0 ? $it['retail_price'] : ($curr['retail_price'] ?? 0),

@@ -8,6 +8,13 @@ $tenantId = (int) TenantContext::tenantId();
 $tenantModel = new Models\TenantModel($pdo);
 $tenantModel->ensureShopSchema();
 $tenant = $tenantModel->find($tenantId);
+// Repair known legacy drift before versioned SQL runs. Migration 067 was
+// intentionally idempotent at statement level, but old hosts may already
+// have only some of its retail/package columns.
+new Models\ProductModel($pdo);
+new Models\SaleModel($pdo);
+new Models\OrderModel($pdo);
+new Models\HeldOrderModel($pdo);
 
 if (empty($_SESSION['updates_csrf'])) {
     $_SESSION['updates_csrf'] = bin2hex(random_bytes(24));
