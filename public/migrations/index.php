@@ -11,6 +11,12 @@
 // once you're done setting up a new install.
 
 require_once __DIR__ . '/../../app/app.php';
+if (Modules::supportLocked()) {
+    http_response_code(404);
+    exit('Not found');
+}
+header('Location: ' . public_url('support/'));
+exit;
 
 $schemaFile = ROOT_PATH . '/databases/full_schema.sql';
 $error = '';

@@ -111,12 +111,6 @@ ALTER TABLE users ADD UNIQUE KEY uq_users_tenant_email (tenant_id, email);
 ALTER TABLE users ADD KEY idx_users_tenant (tenant_id);
 ALTER TABLE users ADD KEY idx_users_activation (activation_token);
 
--- Default platform super admin for the CMS admin panel (email: admin@ismano.com,
--- password: Admin123!). Change this password immediately after first login.
-INSERT INTO users (username, email, password_hash, role_id, is_active, email_verified)
-VALUES ('superadmin', 'admin@ismano.com', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 1, 1, 1)
-ON DUPLICATE KEY UPDATE username = username;
-
 CREATE TABLE IF NOT EXISTS user_profiles (
     user_id    INT PRIMARY KEY,
     first_name VARCHAR(100),
@@ -183,6 +177,7 @@ CREATE TABLE IF NOT EXISTS tenants (
     receipt_footer VARCHAR(255) NULL,
     kra_pin        VARCHAR(20)  NULL,
     payment_credentials TEXT NULL,
+    enabled_modules JSON NULL,
     created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uq_tenant_slug (slug),
@@ -1095,9 +1090,8 @@ CREATE TABLE IF NOT EXISTS audit_log (
 
 -- =============================================================================
 -- Done. Next steps:
---   1. Log in as admin@ismano.com (password Admin123!) and change the password.
---   2. Register your first shop/tenant through the app's registration flow —
---      this creates the tenant + owner user + subscription rows for you.
+--   1. Open /support/ and create the shop's primary owner account.
+--   2. Choose the POS modules the shop needs, sign in, then lock setup.
 --   3. If you actually need the old online storefront revived, wire its
 --      routes/models intentionally instead of replaying the historical
 --      migration files.
