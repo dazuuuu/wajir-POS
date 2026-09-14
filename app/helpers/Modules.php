@@ -21,7 +21,7 @@ class Modules
         'staff' => ['label' => 'Staff management', 'description' => 'Staff accounts, permissions, attendance and staff login.'],
     ];
 
-    private const DEFAULT_NEW_INSTALL = [
+    private const LEGACY_DEFAULT = [
         'credit_sales', 'returns', 'inventory', 'customers', 'reports', 'documents',
     ];
 
@@ -48,12 +48,29 @@ class Modules
 
     public static function defaultSelection(): array
     {
-        return self::DEFAULT_NEW_INSTALL;
+        return array_keys(self::DEFINITIONS);
     }
 
     public static function sanitize(array $modules): array
     {
         return array_values(array_intersect(array_keys(self::DEFINITIONS), array_map('strval', $modules)));
+    }
+
+    /** Resolve stored settings, upgrading the former default to all features. */
+    public static function selection($raw): array
+    {
+        if ($raw === null || $raw === '') {
+            return self::defaultSelection();
+        }
+        $selected = is_array($raw) ? $raw : json_decode((string) $raw, true);
+        if (!is_array($selected)) {
+            return [];
+        }
+        $selected = self::sanitize($selected);
+        $legacy = self::LEGACY_DEFAULT;
+        sort($selected);
+        sort($legacy);
+        return $selected === $legacy ? self::defaultSelection() : $selected;
     }
 
     public static function enabled(string $module, ?array $tenant = null): bool
@@ -84,13 +101,7 @@ class Modules
             $raw = $tenant['enabled_modules'] ?? null;
         }
 
-        // NULL means an existing installation has never been configured:
-        // retain all historical modules until the owner makes a choice.
-        if ($raw === null || $raw === '') {
-            return true;
-        }
-        $selected = is_array($raw) ? $raw : json_decode((string) $raw, true);
-        return is_array($selected) && in_array($module, $selected, true);
+        return in_array($module, self::selection($raw), true);
     }
 
     public static function save(PDO $db, int $tenantId, array $modules): void

@@ -113,8 +113,7 @@ if ($owner) {
         $tenantId = $ownerWasPresent ? (int) TenantContext::tenantId() : (int) $owner['tenant_id'];
         $tenant = (new Models\TenantModel($pdo))->find($tenantId);
         $raw = $tenant['enabled_modules'] ?? null;
-        $decoded = $raw !== null ? json_decode((string) $raw, true) : null;
-        $selected = is_array($decoded) ? Modules::sanitize($decoded) : array_keys(Modules::definitions());
+        $selected = Modules::selection($raw);
     } catch (Throwable $ignored) {
     }
 } elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
