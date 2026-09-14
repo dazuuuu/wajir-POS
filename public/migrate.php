@@ -3,6 +3,8 @@
 // command-line access is inconvenient. Only the primary tenant owner can run it.
 require_once __DIR__ . '/../app/app.php';
 PageGuard::primaryOwner();
+header('Location: ' . public_url('super/updates/'));
+exit;
 
 $page_title = 'Run migrations';
 $result = null;

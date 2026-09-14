@@ -19,7 +19,7 @@ $moduleOn = static fn(string $module): bool => Modules::enabled($module, $__tena
 $posOpen = $menuGroupOpen(['/shop', '/orders', '/sales', '/invoices', '/returns', '/customers', '/reports', '/data', '/documents', '/services']);
 $inventoryOpen = $menuGroupOpen(['/inventory', '/store', '/purchases', '/suppliers', '/stationery', '/stock', '/publishers', '/categories']);
 $financeOpen = $menuGroupOpen(['/finances', '/expenses', '/salary', '/payroll', '/commissions', '/taxes']);
-$settingsOpen = $menuGroupOpen(['/admins', '/staff', '/settings', '/clean_migrations']);
+$settingsOpen = $menuGroupOpen(['/admins', '/staff', '/settings', '/updates', '/clean_migrations']);
 $menuUpcoming = [];
 if ($moduleOn('services')) {
     try {
@@ -133,6 +133,9 @@ if ($moduleOn('services')) {
     <?php endif; ?>
     <a class="t-sublink <?php echo $menuOn('/clean_migrations'); ?>" href="<?php echo public_url('clean_migrations.php'); ?>">Clean records</a>
     <a class="t-sublink <?php echo $menuOn('/settings'); ?>" href="<?php echo public_url('super/settings/'); ?>">Settings toggles</a>
+    <?php if ((int) ($__tenant['owner_user_id'] ?? 0) === (int) TenantContext::userId()): ?>
+      <a class="t-sublink <?php echo $menuOn('/updates'); ?>" href="<?php echo public_url('super/updates/'); ?>">System updates</a>
+    <?php endif; ?>
     <?php if ((int) ($__tenant['owner_user_id'] ?? 0) === (int) TenantContext::userId() && !Modules::supportLocked()): ?>
       <a class="t-sublink <?php echo $menuOn('/support'); ?>" href="<?php echo public_url('support/'); ?>">Developer support</a>
     <?php endif; ?>

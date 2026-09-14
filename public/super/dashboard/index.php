@@ -120,6 +120,8 @@ $hour = (int) date('G');
 $greeting = $hour < 12 ? 'Good morning' : ($hour < 17 ? 'Good afternoon' : 'Good evening');
 $dashCreditEnabled = Modules::enabled('credit_sales', $__tenant);
 $dashInventoryEnabled = Modules::enabled('inventory', $__tenant);
+$dashIsPrimaryOwner = TenantContext::role() === 'tenant_owner'
+    && (int) ($__tenant['owner_user_id'] ?? 0) === (int) TenantContext::userId();
 $chartMax = max(1, max($chartValues));
 $lossBars = array_map(fn($v) => round(max(0, $v * 0.38), 2), $chartValues);
 $limitTarget = max(1, $weekSum['revenue'] + max($weekCogs, $damagedLoss, 1));
@@ -128,9 +130,16 @@ ob_start();
 $icon = fn(string $n, int $s = 18) => NavIcons::svg($n, $s);
 ?>
 <div class="dashboard-home">
-    <div class="fin-greeting">
-      <h1><?php echo htmlspecialchars($greeting . ', ' . $userName); ?></h1>
-      <p>Stay on top of sales, stock movement, credit invoices, and team activity.</p>
+    <div class="fin-greeting d-flex justify-content-between align-items-start gap-3 flex-wrap">
+      <div>
+        <h1><?php echo htmlspecialchars($greeting . ', ' . $userName); ?></h1>
+        <p>Stay on top of sales, stock movement, credit invoices, and team activity.</p>
+      </div>
+      <?php if ($dashIsPrimaryOwner): ?>
+        <a class="btn btn-outline-primary btn-sm" href="<?php echo public_url('super/updates/'); ?>">
+          <i class="fas fa-cloud-arrow-down me-1"></i>System updates
+        </a>
+      <?php endif; ?>
     </div>
 
     <div class="fin-grid">
