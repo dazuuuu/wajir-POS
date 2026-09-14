@@ -2,15 +2,20 @@
 // public/clean_migrations.php
 // Admin cleanup/repair tool for stale credit invoices/orders left open after payment.
 require_once __DIR__ . '/../app/app.php';
-PageGuard::tenant();
+PageGuard::primaryOwner();
 
 $pdo = Database::pdo();
 $tenantId = (int) TenantContext::tenantId();
 $userId = (int) TenantContext::userId();
 $O = new Models\OrderModel($pdo);
+$S = new Models\SaleModel($pdo);
 $N = new Models\NotificationModel($pdo);
 $message = '';
 $error = '';
+if (empty($_SESSION['clean_records_csrf'])) {
+    $_SESSION['clean_records_csrf'] = bin2hex(random_bytes(24));
+}
+$cleanCsrf = $_SESSION['clean_records_csrf'];
 
 function clean_money(float $n): string
 {
@@ -47,7 +52,6 @@ function clean_fetch_sales(PDO $pdo, int $tenantId): array
                     created_at
                FROM sales
               WHERE tenant_id = ?
-                AND COALESCE(payment_status,'') <> 'paid'
                 AND status NOT IN ('voided','deleted')
               ORDER BY created_at DESC, id DESC
               LIMIT 200"
@@ -116,12 +120,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     } elseif ($action === 'void_order') {
         $orderId = (int) ($_POST['order_id'] ?? 0);
-        $res = $O->void($orderId, $userId);
+        $res = $O->deleteSale($orderId, $userId);
         if ($res['ok']) {
             $cleared = $N->clearCreditSaleAlerts($orderId);
-            $message = 'Credit invoice/order voided, stock restored, and ' . $cleared . ' matching alert(s) cleared.';
+            $message = 'Credit invoice/order undone. Products were restored and its money was removed from business totals. ' . $cleared . ' matching alert(s) cleared.';
         } else {
             $error = $res['error'] ?? 'Could not void that order.';
+        }
+    } elseif (in_array($action, ['undo_order_sale', 'undo_direct_sale'], true)) {
+        if (!hash_equals($cleanCsrf, (string) ($_POST['csrf'] ?? ''))) {
+            $error = 'This delete request expired. Reload the page and try again.';
+        } elseif ($action === 'undo_order_sale') {
+            $orderId = (int) ($_POST['order_id'] ?? 0);
+            $res = $O->deleteSale($orderId, $userId);
+            if ($res['ok']) {
+                $N->clearCreditSaleAlerts($orderId);
+                $message = 'Invoice sale deleted safely. Products returned to stock and the sale was removed from financial totals.';
+            } else {
+                $error = $res['error'] ?? 'Could not undo that invoice sale.';
+            }
+        } else {
+            $res = $S->deleteSale((int) ($_POST['sale_id'] ?? 0), $userId);
+            $message = $res['ok']
+                ? 'Sale deleted safely. Products returned to stock and the sale was removed from financial totals.'
+                : '';
+            $error = $res['ok'] ? '' : ($res['error'] ?? 'Could not undo that sale.');
         }
     } elseif ($action === 'delete_invoice_document') {
         $res = $O->deleteInvoiceDocuments($userId, (int) ($_POST['order_id'] ?? 0));
@@ -165,7 +188,7 @@ ob_start();
 <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
   <div>
     <h1 class="h5 fw-bold mb-1">Clean records</h1>
-    <p class="text-muted small mb-0">Repair paid invoices/orders that are still marked pending, delete invoice documents without touching products or sales, or void unwanted credit orders and return stock.</p>
+    <p class="text-muted small mb-0">Repair stale balances, hide invoice documents, or safely undo test invoices and sales while keeping products.</p>
   </div>
   <div class="d-flex gap-2 flex-wrap">
     <form method="post" onsubmit="return confirm('Clear all credit-sale banner alerts? This only hides alerts, not invoices.');">
@@ -212,6 +235,12 @@ ob_start();
                 <input type="hidden" name="action" value="delete_invoice_document">
                 <input type="hidden" name="order_id" value="<?php echo (int) $inv['id']; ?>">
                 <button class="btn btn-sm btn-outline-danger">Delete invoice</button>
+              </form>
+              <form method="post" class="d-inline" onsubmit="return confirm('Undo this entire sale? Sold quantities will return to stock and the payment will be removed from financial totals. Products will NOT be deleted.');">
+                <input type="hidden" name="action" value="undo_order_sale">
+                <input type="hidden" name="order_id" value="<?php echo (int) $inv['id']; ?>">
+                <input type="hidden" name="csrf" value="<?php echo htmlspecialchars($cleanCsrf); ?>">
+                <button class="btn btn-sm btn-danger">Undo sale + restore stock</button>
               </form>
             </td>
           </tr>
@@ -319,10 +348,13 @@ ob_start();
 
 <?php if ($staleSales || $openSales): ?>
 <div class="card border-0 shadow-sm mt-4" style="border-radius:14px;overflow:hidden;">
-  <div class="px-4 py-3 border-bottom bg-white"><h2 class="h6 fw-bold mb-0">Legacy direct credit sales</h2></div>
+  <div class="px-4 py-3 border-bottom bg-white">
+    <h2 class="h6 fw-bold mb-0">Direct sales</h2>
+    <div class="text-muted small">Undo test sales without deleting their products.</div>
+  </div>
   <div class="table-responsive">
     <table class="table align-middle mb-0">
-      <thead><tr><th>Receipt</th><th>Customer</th><th>Status</th><th class="text-end">Paid</th><th class="text-end">Due</th></tr></thead>
+      <thead><tr><th>Receipt</th><th>Customer</th><th>Status</th><th class="text-end">Paid</th><th class="text-end">Due</th><th></th></tr></thead>
       <tbody>
         <?php foreach (array_merge($staleSales, $openSales) as $r): ?>
           <tr>
@@ -331,6 +363,14 @@ ob_start();
             <td><?php echo (float) $r['calculated_due'] <= 0.0001 ? '<span class="badge bg-success">Ready to repair</span>' : '<span class="badge bg-warning text-dark">Still unpaid</span>'; ?></td>
             <td class="text-end"><?php echo clean_money((float) $r['amount_paid']); ?></td>
             <td class="text-end"><?php echo clean_money((float) $r['calculated_due']); ?></td>
+            <td class="text-end clean-actions">
+              <form method="post" class="d-inline" onsubmit="return confirm('Undo this sale, restore its stock, and remove its money from financial totals? Products will NOT be deleted.');">
+                <input type="hidden" name="action" value="undo_direct_sale">
+                <input type="hidden" name="sale_id" value="<?php echo (int) $r['id']; ?>">
+                <input type="hidden" name="csrf" value="<?php echo htmlspecialchars($cleanCsrf); ?>">
+                <button class="btn btn-sm btn-danger">Undo sale</button>
+              </form>
+            </td>
           </tr>
         <?php endforeach; ?>
       </tbody>

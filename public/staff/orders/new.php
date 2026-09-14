@@ -35,6 +35,10 @@ $customerEmail = '';
 $customerPhone = '';
 $creditDurationDays = 14;
 $heldOrderId = 0;
+$openingDeposit = 0.0;
+$openingDepositMethod = 'cash';
+$canTakeOpeningDeposit = true; // Anyone authorized to open the credit sale may record its opening deposit.
+$depositMethods = PaymentOptions::depositMethods($tenant);
 
 $normalizePriceType = static function ($type): string {
     return in_array($type, ['retail', 'retail_pack', 'wholesale'], true) ? $type : 'retail';
@@ -79,6 +83,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $customerEmail = trim($_POST['customer_email'] ?? '');
     $customerPhone = trim($_POST['customer_phone'] ?? '');
     $creditDurationDays = max(0, (int) ($_POST['credit_duration_days'] ?? 0));
+    $openingDeposit = $canTakeOpeningDeposit ? max(0, round((float) ($_POST['opening_deposit'] ?? 0), 2)) : 0.0;
+    $openingDepositMethod = isset($depositMethods[$_POST['opening_deposit_method'] ?? ''])
+        ? (string) $_POST['opening_deposit_method']
+        : 'cash';
     $heldOrderId = (int) ($_POST['held_order_id'] ?? 0);
     if (!is_array($cart)) { $cart = []; }
     $items = [];
@@ -117,7 +125,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $additionalCharges = max(0, round((float) ($_POST['additional_charges'] ?? 0), 2));
         $additionalNote = trim((string) ($_POST['additional_charges_note'] ?? ''));
 
-        $res = (new Models\OrderModel($pdo))->open([
+        $orderModel = new Models\OrderModel($pdo);
+        $res = $orderModel->open([
             'table_name'      => $customerName,
             'opened_by'       => TenantContext::userId(),
             'items'           => $items,
@@ -131,8 +140,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'credit_duration_days' => $creditDurationDays,
         ]);
         if ($res['ok']) {
+            $depositNote = '';
+            if ($openingDeposit > 0) {
+                $deposit = min($openingDeposit, max(0, round($subtotal - $discount + $additionalCharges, 2)));
+                $payment = $orderModel->markPaid((int) $res['order_id'], [
+                    'method' => 'credit',
+                    'deposit_method' => $openingDepositMethod,
+                    'amount_received' => $deposit,
+                    'amount_tendered' => $openingDepositMethod === 'cash' ? $deposit : null,
+                ], TenantContext::userId());
+                $depositNote = $payment['ok']
+                    ? ' Opening deposit of KES ' . number_format($deposit, 2) . ' recorded by ' . ($depositMethods[$openingDepositMethod] ?? $openingDepositMethod) . '.'
+                    : ' The credit sale was opened, but its deposit was not recorded: ' . ($payment['error'] ?? 'unknown payment error') . '.';
+            }
             if ($heldOrderId > 0) { $HO->discard($heldOrderId); }
-            $opened = (new Models\OrderModel($pdo))->find((int) $res['order_id']);
+            $opened = $orderModel->find((int) $res['order_id']);
             $mailNote = '';
             if ($opened) {
                 $opened['opened_by_name'] = $_SESSION['username'] ?? '';
@@ -148,16 +170,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'logo' => Branding::tenantLogo($tenant),
                         'payment_credentials' => $tenant['payment_credentials'] ?? '',
                     ];
-                    $msg = build_order_invoice_email($opened, (new Models\OrderModel($pdo))->items((int) $res['order_id']), $shop);
+                    $msg = build_order_invoice_email($opened, $orderModel->items((int) $res['order_id']), $shop);
                     $mailNote = (new MailService())->send($opened['customer_email'], $msg['subject'], $msg['html'], $msg['text'])
                         ? ' Invoice emailed.'
                         : ' Invoice email failed: ' . (MailService::lastError() ?: 'unknown error');
                     if (strpos($mailNote, ' Invoice emailed') === 0) {
-                        (new Models\OrderModel($pdo))->markInvoiceSent((int) $res['order_id']);
+                        $orderModel->markInvoiceSent((int) $res['order_id']);
                     }
                 }
             }
-            $_SESSION['flash']['success'] = 'Credit sale opened - ' . $res['receipt_number'] . '.' . $mailNote;
+            $_SESSION['flash']['success'] = 'Credit sale opened - ' . $res['receipt_number'] . '.' . $depositNote . $mailNote;
             header('Location: ' . $ordersViewBase . '?id=' . $res['order_id']);
             exit;
         }
@@ -390,6 +412,29 @@ ob_start();
       <div class="d-flex justify-content-between pos-total-line"><span>Total</span><span id="totalOut">KES 0</span></div>
     </div>
 
+    <?php if ($canTakeOpeningDeposit): ?>
+    <div class="mt-3 border rounded-3 p-3 bg-light">
+      <div class="fw-semibold small mb-1">Opening credit balance &amp; deposit</div>
+      <div class="d-flex justify-content-between small mb-2"><span>Opening sale</span><strong id="openingCreditOut">KES 0</strong></div>
+      <div class="row g-2">
+        <div class="col-7">
+          <label class="form-label small mb-1">Deposit received <span class="text-muted">(optional)</span></label>
+          <input type="number" step="0.01" min="0" name="opening_deposit" id="openingDepositInput" class="form-control form-control-sm" value="<?php echo $openingDeposit > 0 ? htmlspecialchars((string) $openingDeposit) : ''; ?>" placeholder="0">
+        </div>
+        <div class="col-5">
+          <label class="form-label small mb-1">Mode</label>
+          <select name="opening_deposit_method" class="form-select form-select-sm">
+            <?php foreach ($depositMethods as $methodKey => $methodLabel): ?>
+              <option value="<?php echo htmlspecialchars($methodKey); ?>" <?php echo $openingDepositMethod === $methodKey ? 'selected' : ''; ?>><?php echo htmlspecialchars($methodLabel); ?></option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+      </div>
+      <div class="d-flex justify-content-between small mt-2"><span>Credit remaining</span><strong class="text-danger" id="remainingCreditOut">KES 0</strong></div>
+      <div class="form-text">Leave the deposit empty to record the entire sale as credit. Payment date and time are saved automatically.</div>
+    </div>
+    <?php endif; ?>
+
     <div class="mt-3">
       <label class="form-label small mb-1">Loyal customer credit override</label>
       <input type="number" step="0.01" min="0" name="credit_override_amount" class="form-control form-control-sm" placeholder="Optional higher product limit">
@@ -398,9 +443,9 @@ ob_start();
 
     <div class="pos-actions">
       <button type="submit" class="pos-btn pos-btn-outline" id="holdBtn" disabled>Hold Sale</button>
-      <button type="submit" class="pos-btn pos-btn-primary" id="checkoutBtn" disabled>Place Order</button>
+      <button type="submit" class="pos-btn pos-btn-primary" id="checkoutBtn" disabled>Proceed Credit Sale</button>
     </div>
-    <div class="text-muted small text-center mt-2">Place Order opens an unpaid invoice — settle it later on Payments.</div>
+    <div class="text-muted small text-center mt-2">Proceed records the unpaid balance under Credit Sales.</div>
   </aside>
 </div>
 </form>
@@ -685,8 +730,16 @@ function updateTotals() {
     if (d > sub) d = sub;
     var extra = parseFloat((document.getElementById('extraChargeInput') || {}).value) || 0;
     if (extra < 0) extra = 0;
+    var total = sub - d + extra;
+    var depositInput = document.getElementById('openingDepositInput');
+    var deposit = depositInput ? Math.max(0, parseFloat(depositInput.value) || 0) : 0;
+    if (deposit > total) deposit = total;
     document.getElementById('subtotalOut').textContent = money(sub);
-    document.getElementById('totalOut').textContent = money(sub - d + extra);
+    document.getElementById('totalOut').textContent = money(total);
+    var openingOut = document.getElementById('openingCreditOut');
+    var remainingOut = document.getElementById('remainingCreditOut');
+    if (openingOut) openingOut.textContent = money(total);
+    if (remainingOut) remainingOut.textContent = money(Math.max(0, total - deposit));
 }
 
 var cartSearchQuery = '';
@@ -799,6 +852,8 @@ function syncTypedQty(input) {
 document.getElementById('discountInput').addEventListener('input', updateTotals);
 var extraChargeInput = document.getElementById('extraChargeInput');
 if (extraChargeInput) extraChargeInput.addEventListener('input', updateTotals);
+var openingDepositInput = document.getElementById('openingDepositInput');
+if (openingDepositInput) openingDepositInput.addEventListener('input', updateTotals);
 document.getElementById('saleModeTabs').addEventListener('click', function (e) {
     var btn = e.target.closest('[data-sale-mode]');
     if (!btn) return;
