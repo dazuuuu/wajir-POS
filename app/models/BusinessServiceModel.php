@@ -202,13 +202,15 @@ class BusinessServiceModel extends Model
 
     public function upcomingForUser(int $userId, int $minutes = 60): array
     {
+        $now = date('Y-m-d H:i:s');
+        $end = date('Y-m-d H:i:s', strtotime("+$minutes minutes"));
         $st = $this->db->prepare(
             "SELECT * FROM service_appointments
               WHERE tenant_id = ? AND (staff_id = ? OR created_by = ?) AND status = 'booked'
-                AND scheduled_at BETWEEN NOW() AND DATE_ADD(NOW(), INTERVAL ? MINUTE)
+                AND scheduled_at BETWEEN ? AND ?
            ORDER BY scheduled_at ASC LIMIT 10"
         );
-        $st->execute([\TenantContext::tenantId(), $userId, $userId, max(1, $minutes)]);
+        $st->execute([\TenantContext::tenantId(), $userId, $userId, $now, $end]);
         return $st->fetchAll();
     }
 

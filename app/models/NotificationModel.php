@@ -113,6 +113,7 @@ class NotificationModel extends Model
 
     private function ensureSchema(): void
     {
+        if ($this->db->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'sqlite') { return; }
         try {
             $this->db->exec(
                 "CREATE TABLE IF NOT EXISTS tenant_notifications (

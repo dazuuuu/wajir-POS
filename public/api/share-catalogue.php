@@ -9,8 +9,8 @@ header('Content-Type: application/json');
 if (!defined('ROOT_PATH')) {
     define('ROOT_PATH', dirname(__DIR__, 2));
 }
-if (is_file(ROOT_PATH . '/vendor/autoload.php')) {
-    require_once ROOT_PATH . '/vendor/autoload.php';
+if (is_file(ROOT_PATH . '/app/vendor/autoload.php')) {
+    require_once ROOT_PATH . '/app/vendor/autoload.php';
 }
 spl_autoload_register(function ($class) {
     foreach (['/app/helpers/', '/app/services/'] as $dir) {

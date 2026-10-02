@@ -85,7 +85,7 @@ class ReturnModel extends Model
             SELECT 'order' AS source_type, o.id, o.receipt_number, o.table_name AS customer_name,
                    o.total, o.created_at, u.username AS staff_name,
                    (
-                       SELECT GROUP_CONCAT(oi.product_name SEPARATOR ', ')
+                       SELECT GROUP_CONCAT(oi.product_name, ', ')
                          FROM order_items oi
                         WHERE oi.tenant_id = o.tenant_id AND oi.order_id = o.id
                    ) AS items_summary
@@ -118,7 +118,7 @@ class ReturnModel extends Model
             SELECT 'sale' AS source_type, s.id, s.receipt_number, s.customer_name,
                    s.total, s.created_at, u.username AS staff_name,
                    (
-                       SELECT GROUP_CONCAT(si.product_name SEPARATOR ', ')
+                       SELECT GROUP_CONCAT(si.product_name, ', ')
                          FROM sale_items si
                         WHERE si.tenant_id = s.tenant_id AND si.sale_id = s.id
                    ) AS items_summary
@@ -649,6 +649,7 @@ class ReturnModel extends Model
 
     private function ensureSchema(): void
     {
+        if ($this->db->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'sqlite') { return; }
         self::ensureTableExists($this->db);
     }
 

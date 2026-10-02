@@ -147,6 +147,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif ($action === 'clear_credit_alerts') {
         $cleared = $N->clearCreditSaleAlerts();
         $message = "Cleared {$cleared} credit-sale alert(s).";
+    } elseif ($action === 'quick_clear_sales') {
+        if (trim((string) ($_POST['confirm'] ?? '')) !== 'CLEAR') {
+            $error = 'Type CLEAR to confirm.';
+        } else {
+            $res = (new TenantResetService($pdo))->resetShopData($tenantId, ['sales', 'credit_sales', 'invoices', 'returns']);
+            if ($res['ok']) {
+                $count = array_sum($res['deleted']);
+                $message = 'Cleared ' . number_format($count) . ' sale/invoice/return record' . ($count === 1 ? '' : 's') . '. Products and customers were not touched.';
+            } else {
+                $error = $res['error'] ?? 'Could not clear sales data.';
+            }
+        }
     }
 }
 
@@ -178,6 +190,27 @@ ob_start();
 
 <?php if ($message): ?><div class="alert alert-success"><?php echo htmlspecialchars($message); ?></div><?php endif; ?>
 <?php if ($error): ?><div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
+
+<div class="card border-danger shadow-sm mb-4" style="border-radius:14px;">
+  <div class="card-body p-4">
+    <h2 class="h6 fw-bold text-danger mb-1"><i class="fas fa-broom me-1"></i>Clear sales &amp; earnings</h2>
+    <p class="text-muted small mb-3">
+      Permanently deletes every sale, credit sale, invoice and return for this shop — wiping your recorded
+      earnings — while <strong>keeping every product in stock and every customer record exactly as they are</strong>.
+      This cannot be undone.
+    </p>
+    <form method="post" class="row g-2 align-items-end" onsubmit="return confirm('Permanently delete ALL sales, credit sales, invoices and returns? Products and customers will be kept. This cannot be undone.');">
+      <input type="hidden" name="action" value="quick_clear_sales">
+      <div class="col-12 col-sm-5">
+        <label class="form-label small fw-semibold">Type CLEAR to confirm</label>
+        <input type="text" name="confirm" class="form-control" autocomplete="off" placeholder="CLEAR">
+      </div>
+      <div class="col-12 col-sm-4">
+        <button class="btn btn-danger w-100"><i class="fas fa-broom me-1"></i>Clear sales &amp; earnings</button>
+      </div>
+    </form>
+  </div>
+</div>
 
 <div class="card border-0 shadow-sm mb-4" style="border-radius:14px;overflow:hidden;">
   <div class="px-4 py-3 border-bottom bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">

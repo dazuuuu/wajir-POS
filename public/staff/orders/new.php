@@ -647,10 +647,8 @@ function attachCustomerLookup() {
         var q = input.value.trim();
         if (!q) { hide(); return; }
         timer = setTimeout(function(){
-            fetch(CUSTOMER_SEARCH_URL + '?q=' + encodeURIComponent(q) + '&limit=8')
-                .then(function(r){ return r.json(); })
-                .then(function(data){ render(data.items || []); })
-                .catch(function(){});
+            safeFetchJson(CUSTOMER_SEARCH_URL + '?q=' + encodeURIComponent(q) + '&limit=8')
+                .then(function(data){ render(data.items || []); });
         }, 180);
     });
     input.addEventListener('blur', function(){ setTimeout(hide, 160); });
@@ -926,12 +924,27 @@ if (offerBanner) { offerBanner.addEventListener('click', function () { selectDim
 document.getElementById('holdBtn').addEventListener('click', function () { document.getElementById('formAction').value = 'hold'; });
 document.getElementById('checkoutBtn').addEventListener('click', function () { document.getElementById('formAction').value = 'checkout'; });
 
-document.getElementById('orderForm').addEventListener('submit', function (e) {
-    if (this.dataset.submitting === '1') { e.preventDefault(); return; }
-    if (!cartHasItems()) { e.preventDefault(); alert('Add at least one item.'); return; }
-    if (!document.getElementById('customerName').value.trim()) { e.preventDefault(); alert('Enter a customer name.'); return; }
-    this.dataset.submitting='1';
-    this.querySelectorAll('button[type=submit]').forEach(function(button){button.disabled=true;});
+OfflineOrders.wireForm(document.getElementById('orderForm'), {
+    validate: function () {
+        if (!cartHasItems()) { return 'Add at least one item.'; }
+        if (!document.getElementById('customerName').value.trim()) { return 'Enter a customer name.'; }
+        return '';
+    },
+    onQueued: function (payload) {
+        // Reflect the sold items locally so this device doesn't oversell the
+        // same stock again before it's back online and synced.
+        try {
+            var cartLines = JSON.parse(payload.cart || '[]');
+            cartLines.forEach(function (line) {
+                var p = PRODUCTS[String(line.product_id)];
+                if (p) { p.stock = Math.max(0, (p.stock || 0) - (parseFloat(line.quantity) || 0)); }
+            });
+        } catch (ignored) {}
+        alert('No internet right now — this sale has been saved on this device and will sync automatically once you\'re back online.');
+        cart = {};
+        render();
+        updateProductModeDisplay();
+    }
 });
 
 var barcodeScan = document.getElementById('barcodeScan');
@@ -949,9 +962,32 @@ if (barcodeScan) {
         var code = barcodeScan.value.trim();
         barcodeScan.value = '';
         if (!code) { return; }
-        fetch(<?php echo json_encode(public_url('api/inventory/pos_barcode.php')); ?> + '?code=' + encodeURIComponent(code))
-          .then(function(r){return r.json();}).then(function(data){
-            var p=data.item||(data.items&&data.items[0]);if(!p){flashScan('No in-stock product with that barcode.',false);return;}
+        
+        // First check locally loaded barcodes
+        if (BARCODES[code]) {
+            var id = BARCODES[code];
+            var p = PRODUCTS[id];
+            if (p) {
+                if (PC.stockUsed(p, cart[id] || PC.buckets()) >= p.stock) {
+                    flashScan(p.name + ' — no more in stock.', false);
+                    return;
+                }
+                add(id);
+                flashScan(p.name + ' added.', true);
+                return;
+            }
+        }
+
+        // Not found locally, try network if online
+        if (!AppOnline.isOnline()) { 
+            flashScan('Offline — barcode not found in local stock.', false); 
+            return; 
+        }
+
+        safeFetchJson(<?php echo json_encode(public_url('api/inventory/pos_barcode.php')); ?> + '?code=' + encodeURIComponent(code), {}, null)
+          .then(function(data){
+            var p = data && (data.item || (data.items && data.items[0]));
+            if(!p){flashScan('No in-stock product with that barcode.',false);return;}
             p.stock=parseFloat(p.stock!=null?p.stock:p.balance)||0;
             p.unitsPerPack=parseFloat(p.unitsPerPack!=null?p.unitsPerPack:p.unitsInPack)||1;
             p.packUnit=p.packUnit||p.package||'pack';
@@ -960,7 +996,7 @@ if (barcodeScan) {
             var id=String(p.id);PRODUCTS[id]=PRODUCTS[id]||p;BARCODES[code]=id;
             if(PC.stockUsed(PRODUCTS[id],cart[id]||PC.buckets())>=PRODUCTS[id].stock){flashScan(p.name+' — no more in stock.',false);return;}
             add(id);flashScan(p.name+' added.',true);
-          }).catch(function(){flashScan('Could not read barcode. Try again.',false);});
+          });
     });
     document.addEventListener('click', function (e) {
         if (e.target === barcodeScan || e.target.closest('input, textarea, button')) { return; }

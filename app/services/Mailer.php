@@ -22,7 +22,7 @@ class Mailer {
         }
 
         $candidates = [
-            __DIR__ . '/../../vendor/autoload.php',                  // composer
+            __DIR__ . '/../vendor/autoload.php',                     // composer (vendor/ lives under app/)
             __DIR__ . '/../lib/PHPMailer/src/PHPMailer.php',         // manual drop-in
         ];
         foreach ($candidates as $path) {

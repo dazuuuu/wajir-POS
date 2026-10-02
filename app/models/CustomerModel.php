@@ -179,6 +179,76 @@ class CustomerModel extends Model
         }
     }
 
+    /**
+     * Bank an overpayment as store credit (the shop now owes this customer).
+     * Logged as a negative "loyalty_transactions" style entry isn't right here —
+     * store_credit is a separate wallet, not points — so it gets its own ledger.
+     */
+    public function addStoreCredit(int $customerId, float $amount, string $reason, ?int $staffId = null): bool
+    {
+        $amount = round($amount, 2);
+        if ($amount <= 0) {
+            return false;
+        }
+        $tid = \TenantContext::tenantId();
+        $cust = $this->find($customerId);
+        if (!$cust || (int) $cust['tenant_id'] !== (int) $tid) {
+            return false;
+        }
+        $started = false;
+        try {
+            if (!$this->db->inTransaction()) {
+                $this->db->beginTransaction();
+                $started = true;
+            }
+            $new = round((float) ($cust['store_credit'] ?? 0) + $amount, 2);
+            $this->update($customerId, ['store_credit' => $new]);
+            $this->db->prepare(
+                'INSERT INTO customer_store_credit_log (tenant_id, customer_id, amount, reason, created_by) VALUES (?,?,?,?,?)'
+            )->execute([$tid, $customerId, $amount, $reason, $staffId]);
+            if ($started) {
+                $this->db->commit();
+            }
+            return true;
+        } catch (\Throwable $e) {
+            if ($started && $this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            error_log('CustomerModel::addStoreCredit failed: ' . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Spend up to $amount of a customer's store credit (e.g. applying it to a
+     * new credit sale). Returns how much was actually consumed.
+     */
+    public function consumeStoreCredit(int $customerId, float $amount): float
+    {
+        $amount = round(max(0, $amount), 2);
+        if ($amount <= 0) {
+            return 0.0;
+        }
+        $tid = \TenantContext::tenantId();
+        $cust = $this->find($customerId);
+        if (!$cust || (int) $cust['tenant_id'] !== (int) $tid) {
+            return 0.0;
+        }
+        $available = round((float) ($cust['store_credit'] ?? 0), 2);
+        if ($available <= 0) {
+            return 0.0;
+        }
+        $used = min($available, $amount);
+        $this->update($customerId, ['store_credit' => round($available - $used, 2)]);
+        try {
+            $this->db->prepare(
+                'INSERT INTO customer_store_credit_log (tenant_id, customer_id, amount, reason, created_by) VALUES (?,?,?,?,NULL)'
+            )->execute([$tid, $customerId, -$used, 'Applied to a new sale']);
+        } catch (\Throwable $ignored) {
+        }
+        return $used;
+    }
+
     /** Find an active customer by exact name (case-insensitive). */
     public function findByName(string $name): ?array
     {
@@ -218,6 +288,35 @@ class CustomerModel extends Model
             if ((int) $st->fetchColumn() === 0) {
                 $this->db->exec('ALTER TABLE orders ADD COLUMN invoice_deleted_at DATETIME NULL');
             }
+        } catch (\PDOException $ignored) {
+        }
+        // store_credit: money the SHOP owes the customer (e.g. they overpaid a
+        // credit sale). Independent of credit_balance, which is only ever
+        // recomputed from open invoices and would wipe this out otherwise.
+        try {
+            $st = $this->db->prepare(
+                "SELECT COUNT(*) FROM information_schema.columns
+                  WHERE table_schema = DATABASE() AND table_name = 'customers' AND column_name = 'store_credit'"
+            );
+            $st->execute();
+            if ((int) $st->fetchColumn() === 0) {
+                $this->db->exec('ALTER TABLE customers ADD COLUMN store_credit DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER credit_balance');
+            }
+        } catch (\PDOException $ignored) {
+        }
+        try {
+            $this->db->exec(
+                "CREATE TABLE IF NOT EXISTS customer_store_credit_log (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    tenant_id INT NOT NULL,
+                    customer_id INT NOT NULL,
+                    amount DECIMAL(12,2) NOT NULL,
+                    reason VARCHAR(255) NULL,
+                    created_by INT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    KEY idx_cust_credit_log (tenant_id, customer_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            );
         } catch (\PDOException $ignored) {
         }
     }

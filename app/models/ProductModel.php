@@ -463,6 +463,7 @@ class ProductModel extends Model
 
     private function ensureSchema(): void
     {
+        if ($this->db->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'sqlite') { return; }
         $checks = [
             'offer_price' => "ALTER TABLE `products` ADD COLUMN `offer_price` DECIMAL(12,2) NULL AFTER `retail_price`",
             'offer_starts_at' => "ALTER TABLE `products` ADD COLUMN `offer_starts_at` DATETIME NULL AFTER `offer_price`",
@@ -620,6 +621,26 @@ class ProductModel extends Model
         }
         if (isset($in['pack_price']) && $in['pack_price'] !== '' && (!is_numeric($in['pack_price']) || (float) $in['pack_price'] < 0)) {
             $errors['pack_price'] = 'Enter a valid package price.';
+        }
+        if (isset($in['retail_pack_price']) && $in['retail_pack_price'] !== '' && (!is_numeric($in['retail_pack_price']) || (float) $in['retail_pack_price'] < 0)) {
+            $errors['retail_pack_price'] = 'Enter a valid package retail price.';
+        }
+        // A carton/box price only ever shows or sells at the till when the
+        // product also has a pack unit label AND more than 1 item per pack —
+        // that's exactly what the POS checks before offering it. Catching the
+        // mismatch here, instead of leaving it to silently do nothing at the
+        // till, is what actually fixes "I set the price but it's not showing".
+        $wantsPackPricing = (($in['pack_price'] ?? '') !== '' && (float) $in['pack_price'] > 0)
+            || (($in['retail_pack_price'] ?? '') !== '' && (float) $in['retail_pack_price'] > 0);
+        if ($wantsPackPricing && empty($errors['units_per_pack'])) {
+            $packUnit = trim((string) ($in['pack_unit'] ?? ''));
+            $unitsPerPack = ($in['units_per_pack'] ?? '') !== '' ? (float) $in['units_per_pack'] : 1.0;
+            if ($packUnit === '') {
+                $errors['pack_unit'] = 'Enter a pack unit label (e.g. "carton") — a package price needs one to appear at the till.';
+            }
+            if ($unitsPerPack <= 1) {
+                $errors['units_per_pack'] = 'Units per pack must be more than 1 for a package price to appear at the till (it\'s the count of single items inside one carton/box).';
+            }
         }
         if (isset($in['retail_price']) && $in['retail_price'] !== '' && (!is_numeric($in['retail_price']) || (float) $in['retail_price'] < 0)) {
             $errors['retail_price'] = 'Enter a valid retail price.';

@@ -102,7 +102,7 @@ class SalesReport
     public static function pdf(array $data): string
     {
         if (!class_exists('FPDF')) {
-            require_once ROOT_PATH . '/vendor/fpdf/fpdf.php';
+            require_once APP_ROOT . '/vendor/fpdf/fpdf.php';
         }
         $cur   = self::cur($data);
         $shop  = $data['shop'];

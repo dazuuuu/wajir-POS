@@ -169,6 +169,11 @@ class PurchaseModel extends Model
             $params[] = $to;
         }
 
+        $isSqlite = $this->db->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'sqlite';
+        $groupConcatArgs = $isSqlite
+            ? "DISTINCT TRIM(CONCAT(COALESCE(pi.name, ''), IF(pi.variant_label IS NULL OR pi.variant_label = '', '', CONCAT(' ', pi.variant_label))))"
+            : "DISTINCT TRIM(CONCAT(COALESCE(pi.name, ''), IF(pi.variant_label IS NULL OR pi.variant_label = '', '', CONCAT(' ', pi.variant_label)))), ', '";
+
         $sql = "SELECT p.*, s.name AS supplier_name, u.username AS staff_name,
                        (SELECT COUNT(*) FROM purchase_items pi WHERE pi.purchase_id = p.id) AS item_count,
                        (SELECT COUNT(*) FROM purchase_items pi WHERE pi.purchase_id = p.id AND pi.status = 'pending') AS pending_count,
@@ -179,10 +184,7 @@ class PurchaseModel extends Model
                               ELSE pi.buying_price * pi.quantity
                             END
                        ), 0) FROM purchase_items pi WHERE pi.purchase_id = p.id) AS cost_total,
-                       (SELECT GROUP_CONCAT(DISTINCT
-                            TRIM(CONCAT(COALESCE(pi.name, ''), IF(pi.variant_label IS NULL OR pi.variant_label = '', '', CONCAT(' ', pi.variant_label))))
-                            SEPARATOR ', '
-                        ) FROM purchase_items pi WHERE pi.purchase_id = p.id AND COALESCE(pi.name, '') <> '') AS product_names
+                       (SELECT GROUP_CONCAT({$groupConcatArgs}) FROM purchase_items pi WHERE pi.purchase_id = p.id AND COALESCE(pi.name, '') <> '') AS product_names
                   FROM purchases p
              LEFT JOIN suppliers s ON s.id = p.supplier_id
              LEFT JOIN users u ON u.id = p.staff_id

@@ -105,8 +105,8 @@ class StoreProductModel extends Model
             "SELECT si.*, u.username AS created_by_name,
                     (SELECT COUNT(*) FROM store_invoice_items sii WHERE sii.invoice_id = si.id) AS item_count,
                     (SELECT GROUP_CONCAT(
-                        CONCAT(sii.product_name, ' (', TRIM(TRAILING '.' FROM TRIM(TRAILING '0' FROM FORMAT(sii.quantity, 2))), ' ', COALESCE(sii.unit, ''), ')')
-                        ORDER BY sii.id SEPARATOR ', '
+                        CONCAT(sii.product_name, ' (', RTRIM(RTRIM(FORMAT(sii.quantity, 2), '0'), '.'), ' ', COALESCE(sii.unit, ''), ')')
+                        , ', '
                      ) FROM store_invoice_items sii WHERE sii.invoice_id = si.id) AS product_summary
                FROM store_invoices si
           LEFT JOIN users u ON u.id = si.created_by
@@ -179,8 +179,8 @@ class StoreProductModel extends Model
             "SELECT si.*, u.username AS created_by_name,
                     (SELECT COUNT(*) FROM store_invoice_items sii WHERE sii.invoice_id = si.id) AS item_count,
                     (SELECT GROUP_CONCAT(
-                        CONCAT(sii.product_name, ' (', TRIM(TRAILING '.' FROM TRIM(TRAILING '0' FROM FORMAT(sii.quantity, 2))), ' ', COALESCE(sii.unit, ''), ')')
-                        ORDER BY sii.id SEPARATOR ', '
+                        CONCAT(sii.product_name, ' (', RTRIM(RTRIM(FORMAT(sii.quantity, 2), '0'), '.'), ' ', COALESCE(sii.unit, ''), ')')
+                        , ', '
                      ) FROM store_invoice_items sii WHERE sii.invoice_id = si.id) AS product_summary
                FROM store_invoices si
           LEFT JOIN users u ON u.id = si.created_by
@@ -209,10 +209,10 @@ class StoreProductModel extends Model
             return "DATE({$col}) = CURDATE()";
         }
         if ($period === 'week') {
-            return "{$col} >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)";
+            return "{$col} >= '" . date('Y-m-d', strtotime('-7 days')) . "'";
         }
         if ($period === 'month') {
-            return "{$col} >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)";
+            return "{$col} >= '" . date('Y-m-d', strtotime('-30 days')) . "'";
         }
         return '1=1';
     }
@@ -748,7 +748,7 @@ class StoreProductModel extends Model
         }
         $existing = $existing ?: $this->findExistingInventoryProduct($it);
         if ($existing) {
-            $this->restockExistingInventoryProduct((int) $existing['id'], $it);
+            $this->restockExistingInventoryProduct($existing, $it);
             $this->applyQuantityDiscountsFromNotes((int) $existing['id'], (string) ($it['notes'] ?? ''));
             return (int) $existing['id'];
         }
@@ -771,6 +771,7 @@ class StoreProductModel extends Model
             'package_buying_price' => $it['package_buying_price'] ?? null,
             'retail_price' => (float) $it['retail_price'],
             'wholesale_price' => (float) ($it['wholesale_price'] ?: $it['retail_price']),
+            'description' => $it['notes'] ?? null,
             'offer_price' => $it['offer_price'] ?? '',
             'offer_starts_at' => $it['offer_starts_at'] ?? '',
             'offer_ends_at' => $it['offer_ends_at'] ?? '',
@@ -808,37 +809,52 @@ class StoreProductModel extends Model
         (new PriceTierModel($this->db))->replaceForProduct($productId, $tiers);
     }
 
-    private function restockExistingInventoryProduct(int $productId, array $it): void
+    private function restockExistingInventoryProduct(array $existing, array $it): void
     {
+        $productId = (int) $existing['id'];
         $tid = \TenantContext::tenantId();
         $sets = [
             'quantity = quantity + ?',
             'faulty_quantity = faulty_quantity + ?',
-            'buying_price = ?',
-            'package_buying_price = ?',
-            'retail_price = ?',
-            'selling_price = ?',
-            'wholesale_price = ?',
-            'unit = ?',
-            'units_per_pack = ?',
-            'pack_unit = ?',
-            'pack_price = ?',
-            'retail_pack_price = ?',
         ];
         $params = [
             (float) $it['quantity'],
             max(0, (float) ($it['faulty_quantity'] ?? 0)),
-            (float) $it['buying_price'],
-            ($it['package_buying_price'] ?? '') !== '' ? (float) $it['package_buying_price'] : null,
-            (float) $it['retail_price'],
-            (float) $it['retail_price'],
-            (float) ($it['wholesale_price'] ?: $it['retail_price']),
-            $it['unit'] ?: 'piece',
-            max(0.01, (float) ($it['units_per_package'] ?? 1)),
-            $it['package_unit'] ?? null,
-            ($it['package_price'] ?? '') !== '' ? (float) $it['package_price'] : null,
-            ($it['retail_pack_price'] ?? '') !== '' ? (float) $it['retail_pack_price'] : null,
         ];
+
+        $fields = [
+            'buying_price' => ['buying_price', 'float'],
+            'package_buying_price' => ['package_buying_price', 'float_or_null'],
+            'retail_price' => ['retail_price', 'float'],
+            'wholesale_price' => ['wholesale_price', 'float'],
+            'unit' => ['unit', 'string'],
+            'units_per_package' => ['units_per_pack', 'float_positive'],
+            'package_unit' => ['pack_unit', 'string'],
+            'package_price' => ['pack_price', 'float_or_null'],
+            'retail_pack_price' => ['retail_pack_price', 'float_or_null'],
+        ];
+
+        foreach ($fields as $itKey => [$dbKey, $type]) {
+            $val = $it[$itKey] ?? '';
+            if ($type === 'float' && (float) $val > 0) {
+                $sets[] = "$dbKey = ?";
+                $params[] = (float) $val;
+                if ($dbKey === 'retail_price') {
+                    $sets[] = 'selling_price = ?';
+                    $params[] = (float) $val;
+                }
+            } elseif ($type === 'float_or_null' && $val !== '' && (float) $val > 0) {
+                $sets[] = "$dbKey = ?";
+                $params[] = (float) $val;
+            } elseif ($type === 'string' && $val !== '') {
+                $sets[] = "$dbKey = ?";
+                $params[] = (string) $val;
+            } elseif ($type === 'float_positive' && (float) $val > 0) {
+                $sets[] = "$dbKey = ?";
+                $params[] = (float) $val;
+            }
+        }
+
         foreach (['category_id', 'brand_id', 'supplier_id'] as $column) {
             if ((int) ($it[$column] ?? 0) > 0) {
                 $sets[] = $column . ' = ?';
@@ -901,6 +917,7 @@ class StoreProductModel extends Model
 
     private function ensureSchema(): void
     {
+        if ($this->db->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'sqlite') { return; }
         $this->ensureTable(
             'store_products',
             "CREATE TABLE IF NOT EXISTS store_products (

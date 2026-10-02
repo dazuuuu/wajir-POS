@@ -8,8 +8,8 @@ $tid = TenantContext::tenantId();
 $period = in_array($_GET['period'] ?? '', ['today','week','month','all'], true) ? $_GET['period'] : 'month';
 $where = match($period) {
     'today' => 'DATE(x.created_at)=CURDATE()',
-    'week' => 'x.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)',
-    'month' => 'x.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)',
+    'week' => "x.created_at >= '" . date('Y-m-d H:i:s', strtotime('-7 days')) . "'",
+    'month' => "x.created_at >= '" . date('Y-m-d H:i:s', strtotime('-30 days')) . "'",
     default => '1=1',
 };
 $sql = "SELECT staff_id, staff_name, SUM(product_commission) product_commission, SUM(service_commission) service_commission

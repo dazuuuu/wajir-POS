@@ -140,10 +140,10 @@ class FinanceModel extends Model
             return "DATE({$col}) = CURDATE()";
         }
         if ($period === 'week') {
-            return "{$col} >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)";
+            return "{$col} >= '" . date('Y-m-d', strtotime('-7 days')) . "'";
         }
         if ($period === 'month') {
-            return "{$col} >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)";
+            return "{$col} >= '" . date('Y-m-d', strtotime('-30 days')) . "'";
         }
         return '';
     }

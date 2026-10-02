@@ -6,6 +6,8 @@ PageGuard::capability(Capabilities::INVENTORY_VIEW);
 $pdo = Database::pdo();
 $P = new Models\ProductModel($pdo);
 $R = new Models\ReturnModel($pdo);
+$SA = new Models\SaleModel($pdo);
+$OR = new Models\OrderModel($pdo);
 $tenantModel = new Models\TenantModel($pdo);
 $tenantModel->ensureShopSchema();
 $tenant = $tenantModel->find(TenantContext::tenantId()) ?: [];
@@ -57,7 +59,7 @@ $storeUrl = public_url('super/store/');
 $groupUrl = fn(string $g) => public_url('super/inventory/') . '?group=' . $g;
 $pendingReturns = $R->pendingForInventory();
 
-$totals = ['products' => 0, 'stock_value' => 0.0, 'retail_value' => 0.0, 'faulty' => 0.0, 'potential_profit' => 0.0];
+$totals = ['products' => 0, 'stock_value' => 0.0, 'retail_value' => 0.0, 'faulty' => 0.0, 'potential_profit' => 0.0, 'total_items' => 0.0, 'total_cartons' => 0.0];
 $vatRate = (float) ($tenant['vat_rate'] ?? 0);
 $vatMode = !empty($tenant['vat_inclusive']) ? 'inclusive' : 'exclusive';
 foreach ($grouped as $items) {
@@ -70,7 +72,50 @@ foreach ($grouped as $items) {
         $totals['retail_value'] += $qty * $retail;
         $totals['potential_profit'] += ($retail - $buy) * $qty;
         $totals['faulty'] += (float)($p['faulty_quantity'] ?? 0);
+        $totals['total_items'] += $qty;
+        $unitsPerPackTot = max(1, (float) ($p['units_per_pack'] ?? 1));
+        $packUnitTot = trim((string) ($p['pack_unit'] ?? ''));
+        if ($packUnitTot !== '' && $unitsPerPackTot > 1) {
+            $totals['total_cartons'] += floor($qty / $unitsPerPackTot);
+        }
     }
+}
+
+// All-time realized profit + transaction count, across legacy sales and
+// orders (tabs/invoices/receipts). Plain COUNTs here (not forTenant(), which
+// runs a heavier payment-correlated join meant for a bounded "today/week"
+// dashboard view) — this page loads on every visit, so keep it cheap.
+$totalTransactions = 0;
+try {
+    $tid = (int) TenantContext::tenantId();
+    $st = $pdo->prepare("SELECT COUNT(*) FROM sales WHERE tenant_id = ? AND status <> 'voided'");
+    $st->execute([$tid]);
+    $totalTransactions += (int) $st->fetchColumn();
+    $st = $pdo->prepare("SELECT COUNT(*) FROM orders WHERE tenant_id = ? AND status <> 'void'");
+    $st->execute([$tid]);
+    $totalTransactions += (int) $st->fetchColumn();
+} catch (Throwable $e) {
+    $totalTransactions = 0;
+}
+$totalRealizedProfit = 0.0;
+try {
+    $profitByProduct = [];
+    foreach ($SA->productProfit('all') as $pp) {
+        $profitByProduct[(int) $pp['product_id']] = $pp;
+    }
+    foreach ($OR->productProfit('all') as $op) {
+        $pid = (int) $op['product_id'];
+        if (!isset($profitByProduct[$pid])) {
+            $profitByProduct[$pid] = $op;
+            continue;
+        }
+        $profitByProduct[$pid]['profit'] = (float) ($profitByProduct[$pid]['profit'] ?? 0) + (float) ($op['profit'] ?? 0);
+    }
+    foreach ($profitByProduct as $pp) {
+        $totalRealizedProfit += (float) ($pp['profit'] ?? 0);
+    }
+} catch (Throwable $e) {
+    $totalRealizedProfit = 0.0;
 }
 
 $page_title = 'Inventory';
@@ -88,10 +133,19 @@ ob_start();
   <?php endif; ?>
 </div>
 
-<div class="btn-group btn-group-sm mb-4" role="group">
-  <?php foreach (['category' => 'By category', 'brand' => 'By brand', 'supplier' => 'By supplier', 'unit' => 'By unit', 'archived' => 'Archived'] as $g => $lbl): ?>
-    <a href="<?php echo $groupUrl($g); ?>" class="btn btn-outline-secondary <?php echo $groupBy === $g ? 'active' : ''; ?>"><?php echo $lbl; ?></a>
-  <?php endforeach; ?>
+<div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-4">
+  <div class="btn-group btn-group-sm" role="group">
+    <?php foreach (['category' => 'By category', 'brand' => 'By brand', 'supplier' => 'By supplier', 'unit' => 'By unit', 'archived' => 'Archived'] as $g => $lbl): ?>
+      <a href="<?php echo $groupUrl($g); ?>" class="btn btn-outline-secondary <?php echo $groupBy === $g ? 'active' : ''; ?>"><?php echo $lbl; ?></a>
+    <?php endforeach; ?>
+  </div>
+  <div class="position-relative" style="max-width:320px;width:100%;">
+    <i class="fas fa-search position-absolute" style="left:12px;top:50%;transform:translateY(-50%);color:#94a3b8;font-size:.85rem;pointer-events:none;"></i>
+    <input type="text" id="invSearch" class="form-control" placeholder="Search name, category, brand, unit, barcode, status…" style="padding-left:34px;">
+  </div>
+</div>
+<div id="invNoMatch" class="alert alert-light border text-center text-muted small" style="display:none;">
+  <i class="fas fa-magnifying-glass me-1"></i>No products match that search.
 </div>
 
 <div class="row g-3 mb-4">
@@ -128,6 +182,42 @@ ob_start();
       </div>
     </div>
   </div>
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm" style="border-radius:12px;">
+      <div class="card-body p-3">
+        <div class="text-muted small text-uppercase fw-semibold">Total items in shop</div>
+        <div class="h4 mb-0 fw-bold"><?php echo rtrim(rtrim(number_format($totals['total_items'], 2), '0'), '.'); ?></div>
+        <div class="text-muted" style="font-size:.7rem;">Every sellable unit, across all products</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm" style="border-radius:12px;">
+      <div class="card-body p-3">
+        <div class="text-muted small text-uppercase fw-semibold">Total cartons/boxes</div>
+        <div class="h4 mb-0 fw-bold"><?php echo rtrim(rtrim(number_format($totals['total_cartons'], 2), '0'), '.'); ?></div>
+        <div class="text-muted" style="font-size:.7rem;">Whole packs currently on the shelf</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm" style="border-radius:12px;">
+      <div class="card-body p-3">
+        <div class="text-muted small text-uppercase fw-semibold">Total profit (all-time)</div>
+        <div class="h4 mb-0 fw-bold <?php echo $totalRealizedProfit < 0 ? 'text-danger' : 'text-success'; ?>">KES <?php echo number_format($totalRealizedProfit, 0); ?></div>
+        <div class="text-muted" style="font-size:.7rem;">Realized, from actual sales</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm" style="border-radius:12px;">
+      <div class="card-body p-3">
+        <div class="text-muted small text-uppercase fw-semibold">Transactions (all-time)</div>
+        <div class="h4 mb-0 fw-bold"><?php echo number_format($totalTransactions); ?></div>
+        <div class="text-muted" style="font-size:.7rem;">Sales + credit sales + invoices</div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div class="alert alert-light border small py-2 mb-4">
@@ -135,6 +225,15 @@ ob_start();
   <span class="text-muted">(<?php echo htmlspecialchars($vatMode); ?> by default on sales; staff can turn it off at checkout)</span>
 </div>
 
+<style>
+    /* Excel-like Table Styling */
+    .excel-table { border-collapse: collapse; width: 100%; font-family: Calibri, 'Segoe UI', Arial, sans-serif; font-size: 0.85rem; border: 1px solid #ccc; background: #fff; }
+    .excel-table th, .excel-table td { border: 1px solid #d4d4d4; padding: 4px 8px; vertical-align: middle; }
+    .excel-table thead th { background-color: #f3f2f1; color: #333; font-weight: 600; text-align: center; border-bottom: 2px solid #ccc; position: sticky; top: 0; z-index: 10; font-size: 0.85rem; letter-spacing: normal; box-shadow: 0 1px 0 #ccc; }
+    .excel-table tbody tr:hover { background-color: #e5f1fb; }
+    .excel-table tbody td.excel-row-num { background-color: #f3f2f1; color: #666; text-align: center; width: 40px; font-weight: normal; border-right: 2px solid #ccc; }
+    .table-responsive.excel-wrap { max-height: 70vh; overflow-y: auto; border: 1px solid #ccc; box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom: 0; }
+</style>
 <?php if ($pendingReturns): ?>
 <div class="card border-0 shadow-sm mb-4" style="border-radius:14px;overflow:hidden;">
   <div class="px-4 py-3 d-flex align-items-center justify-content-between" style="background:#fff7ed;border-bottom:1px solid #fed7aa;">
@@ -143,10 +242,11 @@ ob_start();
       <span class="text-muted small"><?php echo count($pendingReturns); ?> return<?php echo count($pendingReturns) !== 1 ? 's' : ''; ?> pending migration</span>
     </div>
   </div>
-  <div class="table-responsive">
-    <table class="table align-middle mb-0">
+  <div class="table-responsive excel-wrap">
+    <table class="excel-table">
       <thead>
         <tr class="text-muted small text-uppercase">
+          <th style="width: 40px; text-align: center;">#</th>
           <th>Receipt</th>
           <th>Product</th>
           <th class="text-end">Returned</th>
@@ -158,11 +258,12 @@ ob_start();
         </tr>
       </thead>
       <tbody>
-        <?php foreach ($pendingReturns as $ret):
+        <?php $rowNumP = 1; foreach ($pendingReturns as $ret):
             $fmt = fn($n) => rtrim(rtrim(number_format((float) $n, 2), '0'), '.');
             $canMigrate = !empty($ret['product_id']);
         ?>
         <tr>
+          <td class="excel-row-num"><?php echo $rowNumP++; ?></td>
           <td class="fw-semibold small"><?php echo htmlspecialchars($ret['receipt_number']); ?></td>
           <td>
             <div class="fw-semibold small"><?php echo htmlspecialchars($ret['product_name']); ?></div>
@@ -205,18 +306,19 @@ ob_start();
   </div>
 <?php else: ?>
   <?php foreach ($grouped as $groupName => $items): ?>
-  <div class="card border-0 shadow-sm mb-4" style="border-radius:14px;overflow:hidden;">
+  <div class="card border-0 shadow-sm mb-4 inv-group-card" style="border-radius:14px;overflow:hidden;">
     <div class="px-4 py-3 d-flex align-items-center justify-content-between" style="background:linear-gradient(135deg,#f8fafc,#f1f5f9);border-bottom:1px solid #e2e8f0;">
       <div>
         <h2 class="h6 fw-bold mb-0"><i class="fas fa-box me-2 text-primary"></i><?php echo htmlspecialchars($groupName); ?></h2>
-        <span class="text-muted small"><?php echo count($items); ?> product<?php echo count($items) !== 1 ? 's' : ''; ?></span>
+        <span class="text-muted small inv-group-count"><?php echo count($items); ?> product<?php echo count($items) !== 1 ? 's' : ''; ?></span>
       </div>
     </div>
-    <div class="table-responsive">
-      <table class="table align-middle mb-0">
+    <div class="table-responsive excel-wrap">
+      <table class="excel-table inv-group-table">
         <thead>
           <tr class="text-muted small text-uppercase">
-            <th style="width:48px;"></th>
+            <th style="width: 40px; text-align: center;">#</th>
+            <th style="width:48px;">Image</th>
             <th>Product</th>
             <th>Category</th>
             <th>Brand</th>
@@ -233,7 +335,7 @@ ob_start();
           </tr>
         </thead>
         <tbody>
-          <?php foreach ($items as $p):
+          <?php $rowNumI = 1; foreach ($items as $p):
               $buy = (float)$p['buying_price'];
               $qty = (float)$p['quantity'];
               $faulty = (float)($p['faulty_quantity'] ?? 0);
@@ -258,8 +360,19 @@ ob_start();
                   $colors = array_filter(array_map('trim', explode(',', $p['colors'])));
               }
               $eff = Models\ProductModel::effectivePrice($p);
+              $invSearchHay = strtolower(implode(' ', array_filter([
+                  $p['name'] ?? '',
+                  $p['category_name'] ?? '',
+                  ($p['brand_name'] ?? null) ?: ($p['publisher_name'] ?? ''),
+                  $p['unit'] ?? '',
+                  $packUnit,
+                  $p['barcode'] ?? '',
+                  $p['status'] ?? '',
+                  $groupName,
+              ])));
           ?>
-          <tr>
+          <tr data-search="<?php echo htmlspecialchars($invSearchHay); ?>">
+            <td class="excel-row-num"><?php echo $rowNumI++; ?></td>
             <td>
               <?php if (!empty($p['image_path'])): ?>
                 <img src="<?php echo htmlspecialchars($p['image_path']); ?>" alt="" style="width:40px;height:40px;object-fit:cover;border-radius:8px;border:1px solid #e2e8f0;">
@@ -342,6 +455,31 @@ ob_start();
   </div>
   <?php endforeach; ?>
 <?php endif; ?>
+<script>
+(function () {
+  var input = document.getElementById('invSearch');
+  var noMatch = document.getElementById('invNoMatch');
+  if (!input) return;
+  input.addEventListener('input', function () {
+    var terms = this.value.toLowerCase().trim().split(/\s+/).filter(Boolean);
+    var totalVisible = 0;
+    document.querySelectorAll('.inv-group-card').forEach(function (card) {
+      var visibleInGroup = 0;
+      card.querySelectorAll('tbody tr[data-search]').forEach(function (row) {
+        var hay = row.dataset.search || '';
+        var match = terms.every(function (t) { return hay.indexOf(t) !== -1; });
+        row.style.display = match ? '' : 'none';
+        if (match) visibleInGroup++;
+      });
+      card.style.display = visibleInGroup > 0 ? '' : 'none';
+      var countEl = card.querySelector('.inv-group-count');
+      if (countEl) countEl.textContent = visibleInGroup + ' product' + (visibleInGroup !== 1 ? 's' : '');
+      totalVisible += visibleInGroup;
+    });
+    if (noMatch) noMatch.style.display = (terms.length && totalVisible === 0) ? '' : 'none';
+  });
+})();
+</script>
 <?php
 $content = ob_get_clean();
 $__layout = TenantContext::role() === 'staff' ? 'staff' : 'tenants';

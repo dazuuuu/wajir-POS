@@ -14,9 +14,9 @@ require_once __DIR__ . '/helpers/PathConfig.php';
 // Database::pdo()'s matching `SET time_zone`.
 date_default_timezone_set('Africa/Nairobi');
 
-// Composer (PHPMailer, etc.)
-if (is_file(ROOT_PATH . '/vendor/autoload.php')) {
-    require_once ROOT_PATH . '/vendor/autoload.php';
+// Composer (PHPMailer, etc.) — vendor/ lives under app/, not the project root.
+if (is_file(APP_ROOT . '/vendor/autoload.php')) {
+    require_once APP_ROOT . '/vendor/autoload.php';
 }
 
 spl_autoload_register(function ($class) {

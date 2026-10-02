@@ -19,7 +19,7 @@ use PHPMailer\PHPMailer\SMTP;
 $cfg = is_file(ROOT_PATH . '/app/config/mail.php') ? require ROOT_PATH . '/app/config/mail.php' : [];
 
 $phpmailerAvailable = class_exists(PHPMailer::class);
-$vendorAutoload     = is_file(ROOT_PATH . '/vendor/autoload.php');
+$vendorAutoload     = is_file(APP_ROOT . '/vendor/autoload.php');
 $opensslLoaded      = extension_loaded('openssl');
 $mailConfigExists   = is_file(ROOT_PATH . '/app/config/mail.php');
 

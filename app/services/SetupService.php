@@ -49,7 +49,7 @@ class SetupService
 
     public function runFreshSchema(): array
     {
-        $file = ROOT_PATH . '/databases/full_migration_db.sql';
+        $file = APP_ROOT . '/databases/full_migration_db.sql';
         $sql = is_file($file) ? file_get_contents($file) : false;
         if ($sql === false) {
             return ['ok' => false, 'ran' => 0, 'skipped' => 0, 'error' => 'The schema file could not be read.'];

@@ -117,6 +117,7 @@ class HeldOrderModel extends Model
 
     private function ensureSchema(): void
     {
+        if ($this->db->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'sqlite') { return; }
         $this->ensureTable('held_orders', "
             CREATE TABLE IF NOT EXISTS held_orders (
                 id INT AUTO_INCREMENT PRIMARY KEY,

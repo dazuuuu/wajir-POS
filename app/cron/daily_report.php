@@ -16,7 +16,7 @@ if (php_sapi_name() !== 'cli' && empty($_GET['_cron_web'])) {
 // Bootstrap — resolve ROOT_PATH relative to this file's location.
 define('ROOT_PATH', dirname(__DIR__, 2));
 
-require_once ROOT_PATH . '/vendor/autoload.php';
+require_once ROOT_PATH . '/app/vendor/autoload.php';
 
 // Manual autoloader matching app/app.php
 spl_autoload_register(function ($class) {

@@ -49,8 +49,8 @@ function exp_sales(Models\SaleModel $SA, Models\OrderModel $OR, string $period):
 function exp_period_sql(string $period, string $col): string
 {
     if ($period === 'today') return "DATE({$col}) = CURDATE()";
-    if ($period === 'week') return "{$col} >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)";
-    if ($period === 'month') return "{$col} >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)";
+    if ($period === 'week') return "{$col} >= '" . date('Y-m-d', strtotime('-7 days')) . "'";
+    if ($period === 'month') return "{$col} >= '" . date('Y-m-d', strtotime('-30 days')) . "'";
     return '1=1';
 }
 

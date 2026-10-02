@@ -11,6 +11,7 @@ PageGuard::capability(Capabilities::SALES_VIEW);
 $pdo = Database::pdo();
 $SA  = new Models\SaleModel($pdo);
 $OR  = new Models\OrderModel($pdo);
+$CU  = new Models\CustomerModel($pdo);
 
 $isStaffViewer = TenantContext::role() === 'staff';
 $prefix        = $isStaffViewer ? 'staff/' : 'super/';
@@ -68,6 +69,12 @@ foreach ($visits as $v) {
     }
 }
 $lastVisit = $visits[0]['created_at'] ?? null;
+
+// Store credit: money the SHOP owes this customer from a past overpayment.
+// Matched the same way contact info is (case-insensitive name), since credit
+// sales aren't always attached to a verified customer record.
+$storeCustomer = $CU->findByName($name);
+$storeCredit = (float) ($storeCustomer['store_credit'] ?? 0);
 
 // Batch-load every visit's line items, and roll them up into one "what have
 // they bought, ever" product summary.
@@ -144,6 +151,19 @@ ob_start();
       </div>
     </div>
   </div>
+  <?php if ($storeCredit > 0.0001): ?>
+  <div class="col-12">
+    <div class="card border-0 shadow-sm" style="border-radius:14px;background:#f0fdf4;">
+      <div class="card-body p-3 d-flex align-items-center gap-2">
+        <i class="fas fa-hand-holding-dollar text-success"></i>
+        <div class="small">
+          <strong>Shop owes this customer KES <?php echo number_format($storeCredit, 0); ?></strong>
+          <span class="text-muted"> — from a past overpayment. It auto-applies to their next credit sale.</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <?php endif; ?>
 </div>
 
 <div class="row g-4">

@@ -58,6 +58,7 @@ class TimeLogModel extends Model
 
     private function ensureSchema(): void
     {
+        if ($this->db->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'sqlite') { return; }
         try {
             $this->db->query("SELECT 1 FROM `staff_time_logs` LIMIT 1");
         } catch (\PDOException $e) {

@@ -15,7 +15,7 @@ PageGuard::auth();
 header('Location: ' . public_url('super/updates/'));
 exit;
 
-$schemaFile = ROOT_PATH . '/databases/full_schema.sql';
+$schemaFile = APP_ROOT . '/databases/full_schema.sql';
 $error = '';
 $connectionError = '';
 $alreadyInstalled = false;

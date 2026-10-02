@@ -88,7 +88,7 @@ function public_migrate_split_sql(string $sql): array
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $path = ROOT_PATH . '/databases/full_migration_db.sql';
+    $path = APP_ROOT . '/databases/full_migration_db.sql';
     $sql = is_file($path) ? file_get_contents($path) : false;
     if ($sql === false) {
         $error = 'Migration file not found.';

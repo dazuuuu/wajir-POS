@@ -289,7 +289,20 @@ ob_start();
           Choose exactly which shop data to clear.
           Users, passwords, admin accounts, business details, logo, and receipt settings are kept.
         </p>
-        <form method="post" onsubmit="return confirm('This will permanently delete shop data for this tenant. Continue?');">
+
+        <div class="p-3 mb-4 rounded-3" style="background:#fff5f5;border:1px solid #fecaca;">
+          <div class="fw-semibold small mb-1"><i class="fas fa-broom me-1 text-danger"></i>Quick action</div>
+          <p class="text-muted small mb-2">
+            One click to clear every sale, credit sale, invoice and return — wiping your recorded earnings —
+            while <strong>keeping every product in stock and every customer record</strong> exactly as they are.
+          </p>
+          <button type="button" id="quickClearSalesBtn" class="btn btn-danger w-100">
+            <i class="fas fa-broom me-1"></i>Clear sales &amp; earnings (keep products &amp; customers)
+          </button>
+        </div>
+
+        <p class="text-muted small mb-2">Or pick exactly what to clear yourself:</p>
+        <form method="post" id="resetForm" onsubmit="return confirm('This will permanently delete the selected shop data for this tenant. Continue?');">
           <input type="hidden" name="action" value="reset_shop_data">
           <div class="border rounded-3 p-3 mb-3">
             <?php foreach (TenantResetService::GROUPS as $key => $label): ?>
@@ -300,9 +313,22 @@ ob_start();
             <?php endforeach; ?>
           </div>
           <label class="form-label small fw-semibold">Type RESET to confirm</label>
-          <input type="text" name="reset_confirm" class="form-control mb-3" autocomplete="off" placeholder="RESET">
+          <input type="text" name="reset_confirm" id="resetConfirmInput" class="form-control mb-3" autocomplete="off" placeholder="RESET">
           <button class="btn btn-outline-danger w-100">Reset shop data</button>
         </form>
+        <script>
+        document.getElementById('quickClearSalesBtn').addEventListener('click', function () {
+          if (!confirm('This permanently deletes every sale, credit sale, invoice and return for this shop (your earnings history). Products and customers are kept. Continue?')) {
+            return;
+          }
+          var wanted = ['sales', 'credit_sales', 'invoices', 'returns'];
+          document.querySelectorAll('#resetForm input[name="reset_groups[]"]').forEach(function (cb) {
+            cb.checked = wanted.indexOf(cb.value) !== -1;
+          });
+          document.getElementById('resetConfirmInput').value = 'RESET';
+          document.getElementById('resetForm').submit();
+        });
+        </script>
       </div>
     </div>
   </div>

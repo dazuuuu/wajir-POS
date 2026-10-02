@@ -199,6 +199,7 @@ class StockIntakeModel extends Model
 
     private function ensureSchema(): void
     {
+        if ($this->db->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'sqlite') { return; }
         $this->ensureTable('stock_intakes', "
             CREATE TABLE IF NOT EXISTS stock_intakes (
                 id INT AUTO_INCREMENT PRIMARY KEY,

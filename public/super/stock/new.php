@@ -225,6 +225,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             'package_buying_price' => $it['package_buying_price'] ?: ($curr['package_buying_price'] ?? null),
                             'retail_price' => $it['retail_price'] > 0 ? $it['retail_price'] : ($curr['retail_price'] ?? 0),
                             'wholesale_price' => $it['wholesale_price'] > 0 ? $it['wholesale_price'] : ($curr['wholesale_price'] ?? 0),
+                            'pack_price' => $it['package_price'] ?: ($curr['pack_price'] ?? null),
+                            'retail_pack_price' => $it['retail_pack_price'] ?: ($curr['retail_pack_price'] ?? null),
+                            'description' => $it['notes'] ?: ($curr['description'] ?? null),
                         ]));
                         if ($pRes['ok']) {
                             $savedCount++;

@@ -58,6 +58,11 @@ class OrderModel extends Model
         }
 
         $db = $this->db;
+        // Construct before opening the transaction: compatibility DDL in this
+        // model's constructor would otherwise make MySQL implicitly commit
+        // mid-transaction, leaving a later commit() to fail with "There is no
+        // active transaction" (seen on retail-carton / named-customer sales).
+        $customerModel = new CustomerModel($db);
         try {
             $db->beginTransaction();
 
@@ -86,7 +91,7 @@ class OrderModel extends Model
             $phone = trim((string) ($in['customer_phone'] ?? ''));
             $customerId = (int) ($in['customer_id'] ?? 0);
             if ($customerId <= 0 && $tableName !== '') {
-                $byName = (new CustomerModel($db))->findByName($tableName);
+                $byName = $customerModel->findByName($tableName);
                 if ($byName) {
                     $customerId = (int) $byName['id'];
                 }
@@ -147,13 +152,33 @@ class OrderModel extends Model
             $vals[] = $orderId;
             $db->prepare('UPDATE orders SET ' . implode(', ', $sets) . ' WHERE id = ?')->execute($vals);
 
+            // Auto-apply any store credit this customer is owed (from a past
+            // overpayment) straight onto a new credit tab, before it's even due.
+            $creditApplied = 0.0;
+            if ($channel === 'tab' && $customerId > 0 && (float) $priced['total'] > 0) {
+                $creditApplied = $customerModel->consumeStoreCredit($customerId, (float) $priced['total']);
+                if ($creditApplied > 0) {
+                    $this->ensurePaymentSchema();
+                    $newDue = max(0, round((float) $priced['total'] - $creditApplied, 2));
+                    $newStatus = $newDue <= 0.0001 ? 'paid' : 'open';
+                    $newPaymentStatus = $newStatus === 'paid' ? 'paid' : 'part_paid';
+                    $db->prepare(
+                        'INSERT INTO order_payments (tenant_id, order_id, staff_id, amount, method, provider)
+                         VALUES (?,?,?,?,?,?)'
+                    )->execute([$tid, $orderId, $openedBy, $creditApplied, 'credit', 'Store credit applied']);
+                    $db->prepare(
+                        'UPDATE orders SET amount_paid = ?, amount_due = ?, status = ?, payment_status = ? WHERE id = ?'
+                    )->execute([$creditApplied, $newDue, $newStatus, $newPaymentStatus, $orderId]);
+                }
+            }
+
             $db->commit();
             if ($channel === 'tab' && $customerId > 0) {
                 try {
-                    (new CustomerModel($db))->refreshCreditBalance($customerId);
+                    $customerModel->refreshCreditBalance($customerId);
                 } catch (\Throwable $ignored) {}
             }
-            return ['ok' => true, 'order_id' => $orderId, 'receipt_number' => $receipt, 'errors' => []];
+            return ['ok' => true, 'order_id' => $orderId, 'receipt_number' => $receipt, 'credit_applied' => $creditApplied, 'errors' => []];
         } catch (\Throwable $e) {
             if ($db->inTransaction()) { $db->rollBack(); }
             error_log('OrderModel::open failed: ' . $e->getMessage());
@@ -518,6 +543,12 @@ class OrderModel extends Model
 
         $this->ensurePaymentSchema();
         $db = $this->db;
+        // Construct before opening the transaction: compatibility DDL in these
+        // models' constructors would otherwise make MySQL implicitly commit
+        // mid-transaction, leaving the later commit() to fail with "There is
+        // no active transaction".
+        $customerModel = new CustomerModel($db);
+        $tenantModel = new TenantModel($db);
         try {
             $db->beginTransaction();
             $sel = $db->prepare('SELECT id, status, total, amount_paid, amount_due, customer_id, table_name, invoice_deleted_at FROM orders WHERE id = ? AND tenant_id = ? FOR UPDATE');
@@ -541,7 +572,7 @@ class OrderModel extends Model
                 } catch (\PDOException $ignored) {}
             }
             if ($customerId <= 0) {
-                $byName = (new CustomerModel($db))->findByName((string) ($order['table_name'] ?? ''));
+                $byName = $customerModel->findByName((string) ($order['table_name'] ?? ''));
                 if ($byName) {
                     $customerId = (int) $byName['id'];
                     try {
@@ -561,6 +592,7 @@ class OrderModel extends Model
             }
             $cash  = 0.0;
             $mpesa = 0.0;
+            $overpay = 0.0;
             $tendered = null;
             $change = null;
             $recordMethod = $method;
@@ -598,6 +630,10 @@ class OrderModel extends Model
                     $db->rollBack();
                     return ['ok' => false, 'error' => 'Enter the amount the customer is paying now.'];
                 }
+                // Paying more than the balance closes this sale and banks the
+                // excess as store credit on the customer (shop now owes them),
+                // instead of silently discarding it.
+                $overpay = max(0, round($received - $balanceDue, 2));
                 $received = min($received, $balanceDue);
                 if ($actualMethod === 'cash') {
                     $cash = $received;
@@ -709,11 +745,11 @@ class OrderModel extends Model
 
             if ($newStatus === 'paid' && $customerId > 0) {
                 try {
-                    $tenant = (new TenantModel($db))->find($tid);
+                    $tenant = $tenantModel->find($tid);
                     $rate = (float) ($tenant['loyalty_points_per_kes'] ?? 1);
                     $earned = round($total * $rate, 2);
                     if ($earned > 0) {
-                        (new CustomerModel($db))->adjustPoints($customerId, $earned, 'Sale #' . $orderId, $orderId, $staffId);
+                        $customerModel->adjustPoints($customerId, $earned, 'Sale #' . $orderId, $orderId, $staffId);
                         try {
                             $db->prepare('UPDATE orders SET loyalty_points_earned = ? WHERE id = ?')->execute([$earned, $orderId]);
                         } catch (\PDOException $ignored) {}
@@ -725,8 +761,13 @@ class OrderModel extends Model
 
             if ($customerId > 0) {
                 try {
-                    (new CustomerModel($db))->refreshCreditBalance($customerId);
+                    $customerModel->refreshCreditBalance($customerId);
                 } catch (\Throwable $ignored) {}
+                if ($overpay > 0) {
+                    try {
+                        $customerModel->addStoreCredit($customerId, $overpay, 'Overpayment on sale #' . $orderId, $staffId);
+                    } catch (\Throwable $ignored) {}
+                }
             }
 
             return [
@@ -735,6 +776,7 @@ class OrderModel extends Model
                 'amount_due' => $newDue,
                 'amount_paid' => $newPaid,
                 'amount_paid_now' => $paymentAmount,
+                'overpay_credited' => $overpay,
                 'order_id' => $orderId,
                 'error' => null,
             ];
@@ -1745,8 +1787,8 @@ class OrderModel extends Model
     {
         return match ($period) {
             'today' => "DATE({$alias}.created_at) = CURDATE()",
-            'week'  => "{$alias}.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)",
-            'month' => "{$alias}.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)",
+            'week'  => "{$alias}.created_at >= '" . date('Y-m-d H:i:s', strtotime('-7 days')) . "'",
+            'month' => "{$alias}.created_at >= '" . date('Y-m-d H:i:s', strtotime('-30 days')) . "'",
             default => '1=1',
         };
     }
@@ -1755,8 +1797,8 @@ class OrderModel extends Model
     {
         return match ($period) {
             'today' => "DATE({$alias}.created_at) = CURDATE()",
-            'week'  => "{$alias}.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)",
-            'month' => "{$alias}.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)",
+            'week'  => "{$alias}.created_at >= '" . date('Y-m-d H:i:s', strtotime('-7 days')) . "'",
+            'month' => "{$alias}.created_at >= '" . date('Y-m-d H:i:s', strtotime('-30 days')) . "'",
             default => '1=1',
         };
     }

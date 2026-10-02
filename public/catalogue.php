@@ -7,8 +7,8 @@ if (!defined('ROOT_PATH')) {
     define('ROOT_PATH', dirname(__DIR__));
 }
 require_once ROOT_PATH . '/app/helpers/PathConfig.php';
-if (is_file(ROOT_PATH . '/vendor/autoload.php')) {
-    require_once ROOT_PATH . '/vendor/autoload.php';
+if (is_file(APP_ROOT . '/vendor/autoload.php')) {
+    require_once APP_ROOT . '/vendor/autoload.php';
 }
 spl_autoload_register(function ($class) {
     foreach (['Models\\' => '/app/models/', 'Controllers\\' => '/app/controllers/'] as $prefix => $dir) {

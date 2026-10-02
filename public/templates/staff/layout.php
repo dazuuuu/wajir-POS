@@ -47,6 +47,7 @@ $shopName = $__tenant['name'] ?? 'My Shop';
         .table thead th{ color:#8a8f9c; font-size:.72rem; letter-spacing:.04em; }
     </style>
     <?php echo $extra_css ?? ''; ?>
+    <?php require __DIR__ . '/../../components/pwa_head.php'; ?>
 </head>
 <body>
 <div class="t-wrap">

@@ -94,6 +94,10 @@ class BookAttributeModel extends Model
 
     private function ensureSchema(): void
     {
+        if ($this->db->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'sqlite') {
+            return;
+        }
+
         try {
             $this->db->query("SELECT 1 FROM `book_attributes` LIMIT 1");
             $this->ensureBrandType();
@@ -143,6 +147,9 @@ class BookAttributeModel extends Model
      *  `type` ENUM without 'brand' — widen it in place, once, cheaply. */
     private function ensureBrandType(): void
     {
+        if ($this->db->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'sqlite') {
+            return;
+        }
         $stmt = $this->db->query("SHOW COLUMNS FROM `book_attributes` LIKE 'type'");
         $col = $stmt ? $stmt->fetch() : null;
         $definition = $col['Type'] ?? '';

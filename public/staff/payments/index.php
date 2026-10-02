@@ -791,7 +791,7 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
     <?php endif; ?>
 
     <?php if ($order['status'] === 'open'): ?>
-      <form method="post">
+      <form method="post" id="settleForm">
         <input type="hidden" name="action" value="settle">
         <input type="hidden" name="receipt_number" value="<?php echo htmlspecialchars($order['receipt_number']); ?>">
         <div class="btn-group payment-methods w-100 mb-3 flex-wrap" role="group">
@@ -805,7 +805,8 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
         <div id="creditBox" style="display:<?php echo $preferDeposit ? 'flex' : 'none'; ?>;" class="row g-2 mb-2">
           <div class="col-12 col-sm-6">
             <label class="form-label small">Deposit amount now</label>
-            <input type="number" step="0.01" min="0" max="<?php echo htmlspecialchars((string) $amountDue); ?>" name="amount_received" id="creditAmount" class="form-control" placeholder="0"<?php echo $preferDeposit ? ' autofocus' : ''; ?>>
+            <input type="number" step="0.01" min="0" name="amount_received" id="creditAmount" class="form-control" placeholder="0"<?php echo $preferDeposit ? ' autofocus' : ''; ?>>
+            <div class="form-text">Balance due is KES <?php echo number_format($amountDue, 0); ?>. Paying more closes this sale and banks the extra as store credit for the customer.</div>
           </div>
           <div class="col-12 col-sm-6">
             <label class="form-label small">Received through</label>
@@ -943,6 +944,14 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
         });
         document.getElementById('depositMethod').addEventListener('change', syncMode);
         syncMode();
+
+        if (window.OfflineOrders) {
+          OfflineOrders.wireForm(document.getElementById('settleForm'), {
+            onQueued: function () {
+              alert('No internet right now — this payment has been saved on this device and will be recorded automatically once you\'re back online.');
+            }
+          });
+        }
       </script>
       <style>
         .payment-methods{gap:6px;}

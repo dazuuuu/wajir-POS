@@ -171,7 +171,7 @@ class MigrationService
 
     private function files(): array
     {
-        $files = glob(ROOT_PATH . '/databases/migrations/[0-9][0-9][0-9]_*.sql') ?: [];
+        $files = glob(APP_ROOT . '/databases/migrations/[0-9][0-9][0-9]_*.sql') ?: [];
         sort($files, SORT_NATURAL);
         return $files;
     }

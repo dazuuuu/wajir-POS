@@ -1,0 +1,23 @@
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Editor/IDE
+.vscode/
+.idea/
+
+# Local dev / backups — never meant to be committed (root-only: keeps this
+# from matching real app folders like public/super/updates/)
+/*.zip
+/latest/
+/updates/
+/pushes_files/
+/push_files/
+databases/local_pos.sqlite
+
+# Local-only DB config override (see app/config/database.local.php's header)
+# — this is precisely the file that must NEVER reach the live server.
+app/config/database.local.php
+
+# Dependency directory lives at app/vendor/ and IS committed intentionally
+# (this host has no composer CLI access) — do not ignore it.

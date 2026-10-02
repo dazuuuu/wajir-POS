@@ -617,8 +617,8 @@ class SaleModel extends Model
         $tid = \TenantContext::tenantId();
         $periodSql = match ($period) {
             'today' => "AND DATE(s.created_at) = CURDATE()",
-            'week'  => "AND s.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)",
-            'month' => "AND s.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)",
+            'week'  => "AND s.created_at >= '" . date('Y-m-d H:i:s', strtotime('-7 days')) . "'",
+            'month' => "AND s.created_at >= '" . date('Y-m-d H:i:s', strtotime('-30 days')) . "'",
             default => '',
         };
         $stmt = $this->db->prepare(
@@ -656,6 +656,10 @@ class SaleModel extends Model
      */
     public function productColumns(): array
     {
+        if ($this->db->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'sqlite') {
+            $stmt = $this->db->query('PRAGMA table_info(products)');
+            return $stmt->fetchAll(\PDO::FETCH_COLUMN, 1);
+        }
         $stmt = $this->db->query('SHOW COLUMNS FROM products');
         return $stmt->fetchAll(\PDO::FETCH_COLUMN, 0);
     }
@@ -701,8 +705,8 @@ class SaleModel extends Model
 
         $periodSql = match ($period) {
             'today' => "AND DATE(s.created_at) = CURDATE()",
-            'week'  => "AND s.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)",
-            'month' => "AND s.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)",
+            'week'  => "AND s.created_at >= '" . date('Y-m-d H:i:s', strtotime('-7 days')) . "'",
+            'month' => "AND s.created_at >= '" . date('Y-m-d H:i:s', strtotime('-30 days')) . "'",
             default => '',
         };
 

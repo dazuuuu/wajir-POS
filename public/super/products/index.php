@@ -376,10 +376,13 @@ $actionBadge = function (string $a): string {
             <div class="col-md-4">
               <label class="form-label small">Units per pack</label>
               <input name="units_per_pack" id="unitsPerPackP" type="number" step="0.01" min="0.01" class="form-control" value="<?php echo htmlspecialchars((string) $val('units_per_pack', $editRow['units_per_pack'] ?? 1)); ?>">
+              <small class="text-muted">Must be more than 1 (e.g. 24) for a carton/box price below to show at the till.</small>
+              <?php if (!empty($errors['units_per_pack'])): ?><small class="text-danger d-block"><?php echo htmlspecialchars($errors['units_per_pack']); ?></small><?php endif; ?>
             </div>
             <div class="col-md-4">
               <label class="form-label small">Pack unit label</label>
               <input name="pack_unit" id="packUnitP" type="text" class="form-control" placeholder="e.g. carton" value="<?php echo htmlspecialchars((string) $val('pack_unit', $editRow['pack_unit'] ?? '')); ?>">
+              <?php if (!empty($errors['pack_unit'])): ?><small class="text-danger"><?php echo htmlspecialchars($errors['pack_unit']); ?></small><?php endif; ?>
             </div>
             <div class="col-md-4">
               <label class="form-label small">Selling price of the package (wholesale price)</label>
