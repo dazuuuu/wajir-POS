@@ -15,7 +15,7 @@ if (!$invoice) {
 $items = $SP->invoiceItems($id);
 $tenant = (new Models\TenantModel($pdo))->find(TenantContext::tenantId()) ?: [];
 $shop = $tenant['name'] ?? ReceiptFooter::SHOP_NAME;
-$logo = Branding::loginLogo();
+$logo = Branding::receiptLogo();
 $phone = trim((string) ($tenant['phone'] ?? ReceiptFooter::SHOP_PHONE));
 $poBox = trim((string) ($tenant['po_box'] ?? ReceiptFooter::SHOP_BOX));
 $location = trim((string) ($tenant['address'] ?? ReceiptFooter::SHOP_LOCATION));
@@ -32,7 +32,7 @@ $money = fn($n) => $currency . ' ' . number_format((float) $n, 2);
 <style>
 body{background:#f1f5f9;margin:0;padding:24px;font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;}
 .sheet{background:#fff;max-width:380px;margin:0 auto 18px;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.1);padding:24px;position:relative;overflow:hidden;}
-.sheet::before{content:"";position:absolute;inset:42px 18px;background:url('<?php echo htmlspecialchars($logo, ENT_QUOTES); ?>') center 48%/82% auto no-repeat;opacity:.38;pointer-events:none;}
+<?php if ($logo): ?>.sheet::before{content:"";position:absolute;inset:42px 18px;background:url('<?php echo htmlspecialchars($logo, ENT_QUOTES); ?>') center 48%/82% auto no-repeat;opacity:.38;pointer-events:none;}<?php endif; ?>
 .sheet>*{position:relative;z-index:1;}
 .sheet,.sheet *{font-weight:900!important;color:#000!important;}
 .actions{max-width:380px;margin:0 auto;}
@@ -43,7 +43,7 @@ body{background:#f1f5f9;margin:0;padding:24px;font-family:-apple-system,'Segoe U
 <body>
 <div class="sheet">
   <div style="text-align:center;border-bottom:2px dashed #000;padding-bottom:10px;margin-bottom:10px;">
-    <img src="<?php echo htmlspecialchars($logo); ?>" alt="" style="max-height:104px;max-width:285px;object-fit:contain;margin-bottom:8px;">
+    <?php if ($logo): ?><img src="<?php echo htmlspecialchars($logo); ?>" alt="" style="max-height:104px;max-width:285px;object-fit:contain;margin-bottom:8px;"><?php endif; ?>
     <div style="font-size:24px;"><?php echo htmlspecialchars($shop); ?></div>
     <?php if ($poBox): ?><div style="font-size:15px;"><?php echo htmlspecialchars($poBox); ?></div><?php endif; ?>
     <?php if ($location): ?><div style="font-size:15px;"><?php echo htmlspecialchars($location); ?></div><?php endif; ?>

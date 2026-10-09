@@ -180,7 +180,7 @@ ob_start();
     <p class="text-muted small mb-0">Repair paid invoices/orders that are still marked pending, delete invoice documents without touching products or sales, or void unwanted credit orders and return stock.</p>
   </div>
   <div class="d-flex gap-2 flex-wrap">
-    <form method="post" onsubmit="return confirm('Clear all credit-sale banner alerts? This only hides alerts, not invoices.');">
+    <form method="post" data-online-only onsubmit="return confirm('Clear all credit-sale banner alerts? This only hides alerts, not invoices.');">
       <input type="hidden" name="action" value="clear_credit_alerts">
       <button class="btn btn-sm btn-outline-warning">Clear banner alerts</button>
     </form>
@@ -199,7 +199,7 @@ ob_start();
       earnings — while <strong>keeping every product in stock and every customer record exactly as they are</strong>.
       This cannot be undone.
     </p>
-    <form method="post" class="row g-2 align-items-end" onsubmit="return confirm('Permanently delete ALL sales, credit sales, invoices and returns? Products and customers will be kept. This cannot be undone.');">
+    <form method="post" data-online-only class="row g-2 align-items-end" onsubmit="return confirm('Permanently delete ALL sales, credit sales, invoices and returns? Products and customers will be kept. This cannot be undone.');">
       <input type="hidden" name="action" value="quick_clear_sales">
       <div class="col-12 col-sm-5">
         <label class="form-label small fw-semibold">Type CLEAR to confirm</label>
@@ -218,7 +218,7 @@ ob_start();
       <h2 class="h6 fw-bold mb-0">My invoice documents</h2>
       <div class="text-muted small">Delete invoices you generated or sold as a single record. Products, sales, payments, and stock stay in the database.</div>
     </div>
-    <form method="post" onsubmit="return confirm('Delete ALL invoice documents you generated or sold? Products and sales will not be deleted.');">
+    <form method="post" data-online-only onsubmit="return confirm('Delete ALL invoice documents you generated or sold? Products and sales will not be deleted.');">
       <input type="hidden" name="action" value="delete_all_invoice_documents">
       <button class="btn btn-sm btn-outline-danger" <?php echo $myInvoices ? '' : 'disabled'; ?>>Delete all my invoices</button>
     </form>
@@ -241,7 +241,7 @@ ob_start();
             <td><?php echo $isPaid ? '<span class="badge bg-success">Sold / paid</span>' : '<span class="badge bg-warning text-dark">Generated / unpaid</span>'; ?></td>
             <td class="text-end"><?php echo clean_money((float) $inv['total']); ?></td>
             <td class="text-end clean-actions">
-              <form method="post" class="d-inline" onsubmit="return confirm('Delete this invoice document only? Products and sales will not be deleted.');">
+              <form method="post" data-online-only class="d-inline" onsubmit="return confirm('Delete this invoice document only? Products and sales will not be deleted.');">
                 <input type="hidden" name="action" value="delete_invoice_document">
                 <input type="hidden" name="order_id" value="<?php echo (int) $inv['id']; ?>">
                 <button class="btn btn-sm btn-outline-danger">Delete invoice</button>
@@ -258,7 +258,7 @@ ob_start();
   <div class="card-body p-4">
     <h2 class="h6 fw-bold mb-2">Quick repair</h2>
     <p class="text-muted small mb-3">Marks zero-balance open credit invoices as paid, so they stop showing as pending.</p>
-    <form method="post" onsubmit="return confirm('Repair zero-balance paid records now?');">
+    <form method="post" data-online-only onsubmit="return confirm('Repair zero-balance paid records now?');">
       <input type="hidden" name="action" value="repair_paid">
       <button class="btn btn-primary">Repair paid records</button>
     </form>
@@ -271,7 +271,7 @@ ob_start();
       <h2 class="h6 fw-bold mb-0">Credit-sale banner alerts</h2>
       <div class="text-muted small">These are the yellow banners at the top of the super page.</div>
     </div>
-    <form method="post" onsubmit="return confirm('Clear all credit-sale banner alerts?');">
+    <form method="post" data-online-only onsubmit="return confirm('Clear all credit-sale banner alerts?');">
       <input type="hidden" name="action" value="clear_credit_alerts">
       <button class="btn btn-sm btn-outline-warning">Clear all alerts</button>
     </form>
@@ -335,7 +335,7 @@ ob_start();
                 <td class="text-end text-danger fw-semibold"><?php echo clean_money((float) $r['calculated_due']); ?></td>
                 <td class="text-end clean-actions">
                   <a class="btn btn-sm btn-outline-secondary" href="<?php echo public_url('super/orders/view.php?id=' . (int) $r['id']); ?>">Open</a>
-                  <form method="post" class="d-inline" onsubmit="return confirm('Void this credit invoice/order and restore its products to stock?');">
+                  <form method="post" data-online-only class="d-inline" onsubmit="return confirm('Void this credit invoice/order and restore its products to stock?');">
                     <input type="hidden" name="action" value="void_order">
                     <input type="hidden" name="order_id" value="<?php echo (int) $r['id']; ?>">
                     <button class="btn btn-sm btn-outline-danger">Void</button>

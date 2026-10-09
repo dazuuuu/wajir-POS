@@ -18,8 +18,8 @@ $payments = $O->payments($id);
 $isWalkin = ($order['channel'] ?? 'tab') === 'walkin';
 $tenant   = (new Models\TenantModel($pdo))->find(TenantContext::tenantId());
 $shop     = $tenant['name'] ?? ReceiptFooter::SHOP_NAME;
-$logo     = Branding::loginLogo();
-$watermarkLogo = Branding::loginLogo();
+$logo     = Branding::receiptLogo();
+$watermarkLogo = $logo;
 $currency = $tenant['currency'] ?? 'KES';
 $poBox    = trim((string) ($tenant['po_box'] ?? ReceiptFooter::SHOP_BOX));
 $location = trim((string) ($tenant['address'] ?? ReceiptFooter::SHOP_LOCATION));
@@ -72,7 +72,7 @@ if ($isDepositReceipt && $latestPayment) {
 <style>
   body{background:#f1f5f9;margin:0;padding:24px;font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;}
   .sheet{background:#fff;max-width:380px;margin:0 auto 18px;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.1);padding:24px;font-weight:700;position:relative;overflow:hidden;}
-  .sheet::before{content:"";position:absolute;inset:42px 18px;background:url('<?php echo htmlspecialchars($watermarkLogo, ENT_QUOTES); ?>') center 48%/82% auto no-repeat;opacity:.38;pointer-events:none;}
+  <?php if ($watermarkLogo): ?>.sheet::before{content:"";position:absolute;inset:42px 18px;background:url('<?php echo htmlspecialchars($watermarkLogo, ENT_QUOTES); ?>') center 48%/82% auto no-repeat;opacity:.38;pointer-events:none;}<?php endif; ?>
   .sheet > *{position:relative;z-index:1;}
   .sheet, .sheet *{font-weight:900 !important;color:#000 !important;}
   .sheet table, .sheet th, .sheet td{font-weight:900 !important;color:#000 !important;}

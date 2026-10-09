@@ -114,7 +114,26 @@ if (!$order && ($customerId > 0 || $customerQuery !== '')) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'settle_customer') {
     // Always settle against the customer's full open wallet (all invoices combined).
     $openRows = $O->openInvoicesForCustomer($customerId > 0 ? $customerId : null, $customerQuery);
-    $ids = array_map(fn($inv) => (int) $inv['id'], $openRows);
+    $walletDue = 0.0;
+    foreach ($openRows as $inv) {
+        $walletDue += max(0, (float) $inv['total'] - max(0, (float) ($inv['amount_paid'] ?? 0)));
+    }
+    // Specific invoices ticked? Pay those first (and "full" means their total);
+    // nothing ticked = the whole wallet, oldest invoice first, as before.
+    $picked = array_values(array_unique(array_filter(array_map('intval', (array) ($_POST['pick_ids'] ?? [])))));
+    $pickedRows = $picked ? array_values(array_filter($openRows, fn($inv) => in_array((int) $inv['id'], $picked, true))) : [];
+    if ($picked && !$pickedRows) {
+        $error = 'The invoice you selected is no longer open. Refresh and try again.';
+    }
+    if ($pickedRows) {
+        // Anything paid beyond the selected invoices still reduces the rest
+        // of the wallet (oldest first) instead of being lost.
+        $otherRows = array_values(array_filter($openRows, fn($inv) => !in_array((int) $inv['id'], $picked, true)));
+        $openRows = $pickedRows;
+        $ids = array_merge(array_map(fn($inv) => (int) $inv['id'], $pickedRows), array_map(fn($inv) => (int) $inv['id'], $otherRows));
+    } else {
+        $ids = array_map(fn($inv) => (int) $inv['id'], $openRows);
+    }
     $amount = round((float) ($_POST['amount_received'] ?? 0), 2);
     $mode = $_POST['payment_method'] ?? 'cash';
     $postedMode = $_POST['pay_mode'] ?? 'deposit';
@@ -131,7 +150,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'settl
     }
     $totalDue = round($totalDue, 2);
 
-    if ($extraCharge > 0 && $extraNote === '') {
+    if ($error) {
+        // fall through to re-render with the message
+    } elseif ($extraCharge > 0 && $extraNote === '') {
         $error = 'Enter a reason for the extra charge (e.g. delivery, packing).';
     } elseif ($payMode === 'charge' && $extraCharge <= 0) {
         $error = 'Enter the extra charge amount.';
@@ -211,12 +232,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'settl
             try { $CM->refreshCreditBalance($customerId); } catch (\Throwable $ignored) {}
         }
         $applied = (float) ($res['amount_applied'] ?? $amount);
-        $newBalance = max(0, round($totalDue - $applied, 2));
+        // Whole wallet, not just the invoices picked.
+        $newBalance = max(0, round($walletDue + ($extraCharge > 0 ? $extraCharge : 0) - $applied, 2));
         if ($customerId > 0) {
             $fresh = $CM->find($customerId);
             $newBalance = (float) ($fresh['credit_balance'] ?? $newBalance);
         }
-        $msg = 'Payment of KES ' . number_format($applied, 0) . ' recorded. Wallet balance now KES ' . number_format($newBalance, 0) . '.';
+        $msg = 'Payment of KES ' . number_format($applied, 0) . ' recorded'
+            . ($pickedRows ? ' against ' . implode(', ', array_map(fn($inv) => (string) $inv['receipt_number'], $pickedRows)) : '')
+            . '. Wallet balance now KES ' . number_format($newBalance, 0) . '.';
         if ($extraCharge > 0) {
             $msg .= ' Extra charge KES ' . number_format($extraCharge, 0)
                 . ($extraNote !== '' ? ' (' . $extraNote . ')' : '')
@@ -456,14 +480,16 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
       <table class="table align-middle mb-0">
         <thead>
           <tr class="text-muted small text-uppercase">
+            <th style="width:34px;"><input type="checkbox" class="form-check-input" id="invPickAll" title="Select all" aria-label="Select all invoices"></th>
             <th>Date</th>
             <th>Invoice no</th>
             <th class="text-end">Amount</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
           <?php if (!$customerInvoices): ?>
-            <tr><td colspan="3" class="text-muted text-center py-3">No open invoices — wallet is clear.</td></tr>
+            <tr><td colspan="5" class="text-muted text-center py-3">No open invoices — wallet is clear.</td></tr>
           <?php else: foreach ($customerInvoices as $inv):
             $due = (float) ($inv['balance_due'] ?? $inv['amount_due'] ?? 0);
             if ($due <= 0.0001) {
@@ -471,16 +497,21 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
             }
           ?>
           <tr>
-            <td><?php echo date('j M Y', strtotime($inv['created_at'])); ?></td>
+            <td><input type="checkbox" class="form-check-input inv-pick" form="customerPayForm" name="pick_ids[]"
+                       value="<?php echo (int) $inv['id']; ?>" data-due="<?php echo htmlspecialchars((string) round($due, 2)); ?>"
+                       data-no="<?php echo htmlspecialchars($inv['receipt_number'] ?? ''); ?>" aria-label="Pay this invoice"></td>
+            <td><?php echo date('j M Y, g:i a', strtotime($inv['created_at'])); ?></td>
             <td class="fw-semibold"><?php echo htmlspecialchars($inv['receipt_number'] ?? ''); ?></td>
             <td class="text-end fw-bold text-danger">KES <?php echo number_format($due, 0); ?></td>
+            <td class="text-end"><button type="button" class="btn btn-sm btn-outline-success inv-pay-one" data-id="<?php echo (int) $inv['id']; ?>">Pay this</button></td>
           </tr>
           <?php endforeach; endif; ?>
         </tbody>
         <tfoot>
           <tr class="border-top">
-            <th colspan="2" class="text-end">Total balance</th>
+            <th colspan="3" class="text-end">Total balance</th>
             <th class="text-end text-danger fs-5" id="walletBalanceOut">KES <?php echo number_format($customerBalance, 0); ?></th>
+            <th></th>
           </tr>
         </tfoot>
       </table>
@@ -498,15 +529,15 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
         <input type="hidden" name="order_ids[]" value="<?php echo (int) $inv['id']; ?>">
       <?php endforeach; ?>
 
-      <div class="fw-semibold mb-2">Pay against wallet total</div>
-      <div class="text-muted small mb-3">Deposits reduce the customer’s overall balance (applied oldest invoice first). Extra charges increase credit without a deposit.</div>
+      <div class="fw-semibold mb-2" id="custPayTarget">Pay against wallet total</div>
+      <div class="text-muted small mb-3" id="custPayHint">Deposits reduce the customer’s overall balance (applied oldest invoice first). Tick an invoice above (or press “Pay this”) to pay that specific invoice instead. Extra charges increase credit without a deposit.</div>
 
       <div class="row g-3 mb-3">
         <div class="col-md-4">
           <label class="form-label small">Payment type</label>
           <select name="pay_mode" id="custPayMode" class="form-select">
             <option value="deposit" <?php echo $preferDeposit ? 'selected' : ''; ?>>Deposit / part pay</option>
-            <option value="full" <?php echo $customerInvoices ? '' : 'disabled'; ?>>Pay full wallet balance</option>
+            <option value="full" id="custFullOpt" <?php echo $customerInvoices ? '' : 'disabled'; ?>>Pay full wallet balance</option>
             <option value="charge">Extra charge only (add to credit)</option>
           </select>
         </div>
@@ -620,7 +651,42 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
   var saccos = <?php echo json_encode(array_values($saccos)); ?>;
   function money(n){ return 'KES ' + (Math.round(n*100)/100).toLocaleString('en-KE', {maximumFractionDigits:0}); }
   function chargeAmt(){ return Math.max(0, Math.round((parseFloat(chargeInput && chargeInput.value)||0) * 100) / 100); }
-  function dueWithCharge(){ return Math.round((WALLET_DUE + chargeAmt()) * 100) / 100; }
+  var picks = Array.prototype.slice.call(document.querySelectorAll('.inv-pick'));
+  function pickedRows(){ return picks.filter(function(p){ return p.checked; }); }
+  // Due for what's being paid: the ticked invoices, or the whole wallet.
+  function baseDue(){
+    var sel = pickedRows();
+    if (!sel.length) return WALLET_DUE;
+    return Math.round(sel.reduce(function(s, p){ return s + (parseFloat(p.dataset.due)||0); }, 0) * 100) / 100;
+  }
+  function dueWithCharge(){ return Math.round((baseDue() + chargeAmt()) * 100) / 100; }
+  function syncPicks(){
+    var sel = pickedRows();
+    var all = document.getElementById('invPickAll');
+    if (all) all.checked = sel.length > 0 && sel.length === picks.length;
+    picks.forEach(function(p){ var tr = p.closest('tr'); if (tr) tr.classList.toggle('table-success', p.checked); });
+    document.getElementById('custPayTarget').textContent = sel.length
+      ? 'Pay selected invoice' + (sel.length > 1 ? 's' : '') + ': ' + sel.map(function(p){ return p.dataset.no; }).join(', ') + ' (' + money(baseDue()) + ')'
+      : 'Pay against wallet total';
+    var fullOpt = document.getElementById('custFullOpt');
+    if (fullOpt) fullOpt.textContent = sel.length ? 'Pay selected invoice' + (sel.length > 1 ? 's' : '') + ' in full' : 'Pay full wallet balance';
+    syncDetails();
+  }
+  picks.forEach(function(p){ p.addEventListener('change', syncPicks); });
+  var pickAll = document.getElementById('invPickAll');
+  if (pickAll) pickAll.addEventListener('change', function(){ picks.forEach(function(p){ p.checked = pickAll.checked; }); syncPicks(); });
+  Array.prototype.forEach.call(document.querySelectorAll('.inv-pay-one'), function(b){
+    b.addEventListener('click', function(){
+      picks.forEach(function(p){ p.checked = p.value === b.dataset.id; });
+      if (modeSel.value === 'charge') modeSel.value = 'deposit';
+      syncPicks();
+      var row = picks.filter(function(p){ return p.checked; })[0];
+      if (row && modeSel.value === 'deposit') amountInput.value = (parseFloat(row.dataset.due)||0).toFixed(2);
+      syncHidden();
+      document.getElementById('customerPayForm').scrollIntoView({behavior:'smooth', block:'center'});
+      amountInput.focus();
+    });
+  });
   function isChargeOnly(){ return modeSel && modeSel.value === 'charge'; }
   function fillList(items){
     detailList.innerHTML = '';
@@ -690,7 +756,7 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
     if (collectOut) {
       if (ch > 0) {
         collectOut.style.display = '';
-        document.getElementById('custWalletDueLabel').textContent = money(WALLET_DUE);
+        document.getElementById('custWalletDueLabel').textContent = money(baseDue());
         document.getElementById('custChargeLabel').textContent = money(ch);
         document.getElementById('custCollectTotalLabel').textContent = money(due);
       } else {
@@ -723,6 +789,14 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
       alert('Enter the deposit amount, or add an extra charge.');
     }
   });
+  // Offline: the payment is saved on this device and recorded when back online.
+  if (window.OfflineOrders) {
+    OfflineOrders.wireForm(document.getElementById('customerPayForm'), {
+      onQueued: function () {
+        OfflineOrders.toast('No internet right now — this payment has been saved on this device and will be recorded automatically once you\'re back online.');
+      }
+    });
+  }
   syncDetails();
 })();
 </script>
@@ -948,7 +1022,7 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
         if (window.OfflineOrders) {
           OfflineOrders.wireForm(document.getElementById('settleForm'), {
             onQueued: function () {
-              alert('No internet right now — this payment has been saved on this device and will be recorded automatically once you\'re back online.');
+              OfflineOrders.toast('No internet right now — this payment has been saved on this device and will be recorded automatically once you\'re back online.');
             }
           });
         }

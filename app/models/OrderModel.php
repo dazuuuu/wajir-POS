@@ -78,7 +78,7 @@ class OrderModel extends Model
 
             $saleType = $this->summarySaleType($items, $in['sale_type'] ?? 'retail');
             $creditOverride = max(0, round((float) ($in['credit_override_amount'] ?? 0), 2));
-            $added = $this->insertItems($db, $tid, $orderId, $items, $openedBy, $saleType, $channel === 'tab', $creditOverride);
+            $added = $this->insertItems($db, $tid, $orderId, $items, $openedBy, $saleType, $channel === 'tab', $creditOverride, !empty($in['allow_oversell']));
             if (!$added['ok']) {
                 $db->rollBack();
                 return $added;
@@ -419,7 +419,12 @@ class OrderModel extends Model
     }
 
     /** Shared item-insert + stock-decrement + total-recalc, used by open() and addItems(). */
-    private function insertItems(\PDO $db, int $tid, int $orderId, array $items, int $staffId, string $saleType = 'retail', bool $enforceCreditLimit = false, float $creditOverride = 0.0): array
+    /**
+     * @param bool $allowOversell  a sale already made at the counter while
+     *   offline: record it even if stock here says there isn't enough (the
+     *   goods are gone; stock goes negative and shows up for a recount).
+     */
+    private function insertItems(\PDO $db, int $tid, int $orderId, array $items, int $staffId, string $saleType = 'retail', bool $enforceCreditLimit = false, float $creditOverride = 0.0, bool $allowOversell = false): array
     {
         $selSql = "SELECT id, name, selling_price, wholesale_price, retail_price, offer_price, offer_starts_at, offer_ends_at,
                           credit_limit, quantity, unit, units_per_pack, pack_unit, pack_price, retail_pack_price
@@ -433,7 +438,9 @@ class OrderModel extends Model
             'INSERT INTO order_items (tenant_id, order_id, product_id, product_name, unit_price, base_unit_price, commission_amount, price_type, quantity, line_total, added_by)
              VALUES (?,?,?,?,?,?,?,?,?,?,?)'
         );
-        $dec = $db->prepare('UPDATE products SET quantity = quantity - ? WHERE id = ? AND tenant_id = ? AND quantity >= ?');
+        $dec = $allowOversell
+            ? $db->prepare('UPDATE products SET quantity = quantity - ? WHERE id = ? AND tenant_id = ? AND ? = ?')
+            : $db->prepare('UPDATE products SET quantity = quantity - ? WHERE id = ? AND tenant_id = ? AND quantity >= ?');
         $commissionEnabled = false;
         try {
             $setting = $db->prepare('SELECT product_commission_enabled FROM tenants WHERE id = ? LIMIT 1');
@@ -450,7 +457,7 @@ class OrderModel extends Model
             if (!$p) {
                 return ['ok' => false, 'errors' => ['_' => 'One of the products is no longer available. Refresh and try again.']];
             }
-            if ($qty > (float) $p['quantity']) {
+            if ($qty > (float) $p['quantity'] && !$allowOversell) {
                 return ['ok' => false, 'errors' => ['_' => "Not enough stock for {$p['name']} — only " . rtrim(rtrim(number_format((float) $p['quantity'], 2), '0'), '.') . ' left.']];
             }
             // Offer-aware: charges the live offer price when one is running,
@@ -467,7 +474,16 @@ class OrderModel extends Model
             if ($baseUnitPrice <= 0) { $baseUnitPrice = (float) ($p['retail_price'] ?: $p['selling_price']); $lineTotal = round($baseUnitPrice * $qty, 2); }
             $unitPrice = $baseUnitPrice;
             $commission = 0.0;
-            if ($commissionEnabled && ($it['unit_price'] ?? '') !== '') {
+            // Owner's adjusted price for this sale only (e.g. a loyal customer).
+            // The product's saved price is untouched; the receipt shows only
+            // what was charged. base_unit_price keeps the normal price.
+            $override = isset($it['override_total']) && $it['override_total'] !== '' && $it['override_total'] !== null
+                && \TenantContext::role() === 'tenant_owner'
+                ? round(max(0, (float) $it['override_total']), 2) : null;
+            if ($override !== null && $qty > 0) {
+                $lineTotal = $override;
+                $unitPrice = round($lineTotal / $qty, 2);
+            } elseif ($commissionEnabled && ($it['unit_price'] ?? '') !== '') {
                 $requestedPrice = round((float) $it['unit_price'], 2);
                 if ($requestedPrice + 0.0001 < $baseUnitPrice) {
                     return ['ok' => false, 'errors' => ['_' => "{$p['name']} cannot be sold below KES " . number_format($baseUnitPrice, 2) . '.']];
@@ -484,7 +500,7 @@ class OrderModel extends Model
             }
 
             $insItem->execute([$tid, $orderId, $pid, $p['name'], $unitPrice, $baseUnitPrice, $commission, $lineSaleType, $qty, $lineTotal, $staffId]);
-            $dec->execute([$qty, $pid, $tid, $qty]);
+            $dec->execute($allowOversell ? [$qty, $pid, $tid, 1, 1] : [$qty, $pid, $tid, $qty]);
             if ($dec->rowCount() !== 1) {
                 return ['ok' => false, 'errors' => ['_' => "Stock changed for {$p['name']} while saving. Please try again."]];
             }

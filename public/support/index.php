@@ -310,18 +310,26 @@ if ($owner) {
       }
       btn.disabled = true;
       status.textContent = 'Registering and downloading…';
+      var warm = <?php echo json_encode(OfflineWarm::forSession(), JSON_UNESCAPED_SLASHES); ?>;
       navigator.serviceWorker.register(<?php echo json_encode(public_url('sw.js')); ?>, { scope: <?php echo json_encode(public_url()); ?> })
         .then(function () { return navigator.serviceWorker.ready; })
-        .then(function () {
-          return caches.keys().then(function (names) {
-            var latest = names.filter(function (n) { return n.indexOf('shop-pos-') === 0; }).sort().pop();
-            return latest ? caches.open(latest).then(function (c) { return c.keys(); }) : [];
+        .then(function (reg) {
+          // Ask the worker to download every core POS page now, and wait for
+          // its answer on a private channel.
+          return new Promise(function (resolve, reject) {
+            var channel = new MessageChannel();
+            var timer = setTimeout(function () { reject(new Error('timed out waiting for the download to finish')); }, 60000);
+            channel.port1.onmessage = function (ev) { clearTimeout(timer); resolve(ev.data || {}); };
+            reg.active.postMessage({ type: 'WARM_CACHE', urls: warm.urls, home: warm.home, fp: warm.fp }, [channel.port2]);
           });
         })
-        .then(function (keys) {
-          status.innerHTML = '✅ Offline resources ready — ' + keys.length + ' file(s) cached. ' +
-            'Turn off your internet and reload <a href="' + <?php echo json_encode(public_url('super/dashboard/')); ?> + '">the dashboard</a> or the till screen to test it.';
-          btn.textContent = 'Re-download';
+        .then(function (result) {
+          var ok = result.cached || 0, all = result.total || warm.urls.length;
+          status.innerHTML = (ok === all ? '✅ ' : '⚠️ ') + ok + ' of ' + all + ' POS pages saved for offline use. ' +
+            'Now turn off your internet and open <a href="' + warm.home + '">the till</a> to test it.' +
+            (ok < all ? ' (Pages for features you switched off are skipped — that\'s expected.)' : '');
+          try { localStorage.setItem('posWarmAt:' + warm.home, String(Date.now())); } catch (ignored) {}
+          btn.textContent = 'Download again';
           btn.disabled = false;
         })
         .catch(function (e) {

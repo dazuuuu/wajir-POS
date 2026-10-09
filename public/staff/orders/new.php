@@ -82,12 +82,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $heldOrderId = (int) ($_POST['held_order_id'] ?? 0);
     if (!is_array($cart)) { $cart = []; }
     $items = [];
+    // Only the owner may change a price for one sale.
+    $canAdjustPrice = TenantContext::role() === 'tenant_owner';
     foreach ($cart as $c) {
-        $items[] = [
+        $line = [
             'product_id' => (int) ($c['product_id'] ?? 0),
             'quantity' => (float) ($c['quantity'] ?? 0),
             'price_type' => $normalizePriceType($c['price_type'] ?? 'retail'),
         ];
+        if ($canAdjustPrice && isset($c['override_total']) && is_numeric($c['override_total']) && (float) $c['override_total'] >= 0) {
+            $line['override_total'] = round((float) $c['override_total'], 2);
+        }
+        $items[] = $line;
     }
 
     if ($action === 'hold') {
@@ -111,13 +117,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $prod = null;
             foreach ($products as $p) { if ((int) $p['id'] === $it['product_id']) { $prod = $p; break; } }
             $lineSaleType = $normalizePriceType($it['price_type'] ?? 'retail');
-            if ($prod) { $subtotal += \Pricing::lineTotal($prod, (float) $it['quantity'], $lineSaleType); }
+            if ($prod) {
+                $subtotal += isset($it['override_total'])
+                    ? (float) $it['override_total']
+                    : \Pricing::lineTotal($prod, (float) $it['quantity'], $lineSaleType);
+            }
         }
         $discount = min(max(round((float) ($_POST['discount_amount'] ?? 0), 2), 0), round($subtotal, 2));
         $additionalCharges = max(0, round((float) ($_POST['additional_charges'] ?? 0), 2));
         $additionalNote = trim((string) ($_POST['additional_charges_note'] ?? ''));
 
         $res = (new Models\OrderModel($pdo))->open([
+            'allow_oversell'  => !empty($_POST['_offline']), // made at the counter while offline
             'table_name'      => $customerName,
             'opened_by'       => TenantContext::userId(),
             'items'           => $items,
@@ -211,7 +222,7 @@ ob_start();
         <span>All</span>
       </button>
       <?php foreach ($categories as $c): ?>
-        <button type="button" class="pos-cat" data-cat="<?php echo (int) $c['id']; ?>">
+        <button type="button" class="pos-cat" data-cat="<?php echo (int) $c['id']; ?>" title="<?php echo htmlspecialchars($c['name']); ?>">
           <span class="pos-cat-img">
             <?php if (!empty($c['image_path'])): ?>
               <img src="<?php echo htmlspecialchars($c['image_path']); ?>" alt="">
@@ -229,7 +240,7 @@ ob_start();
         <span>All</span>
       </button>
       <?php foreach ($brands as $pub): ?>
-        <button type="button" class="pos-cat" data-cat="<?php echo (int) $pub['id']; ?>">
+        <button type="button" class="pos-cat" data-cat="<?php echo (int) $pub['id']; ?>" title="<?php echo htmlspecialchars($pub['name']); ?>">
           <span class="pos-cat-img"><i class="fas fa-building"></i></span>
           <span><?php echo htmlspecialchars($pub['name']); ?></span>
         </button>
@@ -426,6 +437,8 @@ ob_start();
 .pos-cat-img img{width:100%;height:100%;object-fit:cover;}
 .pos-cat.active{border-color:var(--pos-green);color:var(--pos-green);background:var(--pos-green-light);}
 .pos-cat.active .pos-cat-img, .pos-cat.active .pos-cat-all{background:#fff;color:var(--pos-green);}
+.pos-cat{width:96px;white-space:normal;}
+.pos-cat > span:last-child{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden;max-width:100%;text-align:center;line-height:1.2;overflow-wrap:anywhere;}
 .pos-prod-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;}
 @media (min-width:520px){ .pos-prod-grid{grid-template-columns:repeat(3,1fr);} }
 @media (min-width:900px){ .pos-prod-grid{grid-template-columns:repeat(4,1fr);} }
@@ -496,6 +509,7 @@ ob_start();
 <script src="<?php echo htmlspecialchars(public_url('assets/js/pos-pack-cart.js')); ?>"></script>
 <script>
 var PC = window.PosPackCart;
+var CAN_ADJUST_PRICE = <?php echo TenantContext::role() === 'tenant_owner' ? 'true' : 'false'; ?>;
 var PRODUCT_COMMISSION_ENABLED = <?php echo !empty($tenant['product_commission_enabled']) ? 'true' : 'false'; ?>;
 var PRODUCTS = {};
 var BARCODES = {};
@@ -748,14 +762,16 @@ function render() {
         var lineTotal = PC.lineTotal(p, c);
         var rows = '';
         if ((c.retail || 0) > 0) {
-            rows += PC.qtyRow(id, 'Retail item', money(PC.productPrice(p, 'retail')) + '/item', 'retail', c.retail || 0, retailMax);
+            rows += PC.qtyRow(id, 'Retail item', money(PC.shownPrice(p, c, 'retail')) + '/item', 'retail', c.retail || 0, retailMax);
         }
         if ((c.retailPack || 0) > 0 && PC.hasRetailPack(p)) {
-            rows += PC.qtyRow(id, 'Retail box', money(PC.productPrice(p, 'retail_pack')) + '/' + PC.packLabel(p), 'retailPack', c.retailPack || 0, retailPackMax);
+            rows += PC.qtyRow(id, 'Retail box', money(PC.shownPrice(p, c, 'retailPack')) + '/' + PC.packLabel(p), 'retailPack', c.retailPack || 0, retailPackMax);
         }
         if ((c.wholesale || 0) > 0) {
-            rows += PC.qtyRow(id, 'Wholesale', money(PC.productPrice(p, 'wholesale')) + '/' + wLabel, 'wholesale', c.wholesale || 0, wholesaleMax);
+            rows += PC.qtyRow(id, 'Wholesale', money(PC.shownPrice(p, c, 'wholesale')) + '/' + wLabel, 'wholesale', c.wholesale || 0, wholesaleMax);
         }
+        // Owner only: change the price for this sale (saved prices stay as they are).
+        var priceEdit = CAN_ADJUST_PRICE ? PC.priceEditor(p, c, id) : { inline: '', block: '' };
         if (PRODUCT_COMMISSION_ENABLED && (c.retail || 0) > 0) {
             rows += '<label class="pos-dual-row"><span class="pos-dual-label">Commission selling price'
               + ' <span class="text-muted">(minimum ' + money(p.price) + ')</span></span>'
@@ -773,7 +789,9 @@ function render() {
           +     (c.retail > 0 && Math.abs((c.retail % 1) - 0.5) < 0.001 ? ' · retail ' + formatHalfQty(c.retail) : '')
           +     (c.retailPack > 0 && Math.abs((c.retailPack % 1) - 0.5) < 0.001 ? ' · retail box ' + formatHalfQty(c.retailPack) : '')
           +     (c.wholesale > 0 && Math.abs((c.wholesale % 1) - 0.5) < 0.001 ? ' · wholesale ' + formatHalfQty(c.wholesale) : '')
-          +     ((PC.hasRetailPack(p) || PC.hasWholesalePack(p)) ? ' <span class="text-muted small">· stock used ' + PC.stockUsed(p, c) + ' items</span>' : '') + '</div>'
+          +     ((PC.hasRetailPack(p) || PC.hasWholesalePack(p)) ? ' <span class="text-muted small">· stock used ' + PC.stockUsed(p, c) + ' items</span>' : '')
+          +     priceEdit.inline + '</div>'
+          +   priceEdit.block
           + '</div>'
           + '<button type="button" class="pos-cart-del" data-del="' + id + '"><i class="fas fa-trash"></i></button>';
         wrap.appendChild(line);
@@ -829,11 +847,20 @@ document.getElementById('cartRows').addEventListener('click', function (e) {
     else if (t.dataset.halfWholesale) bump(t.dataset.halfWholesale, 'wholesale', 0.5);
     else if (t.dataset.del) { delete cart[t.dataset.del]; render(); }
 });
+if (CAN_ADJUST_PRICE) {
+    PC.wirePriceEditor(document.getElementById('cartRows'), {
+        products: PRODUCTS,
+        getLine: ensureCart,
+        render: render,
+        live: function () { document.getElementById('cartInput').value = JSON.stringify(serializeCart()); updateTotals(); }
+    });
+}
 document.getElementById('cartRows').addEventListener('change', function (e) {
     var input = e.target.closest('[data-retail-qty], [data-retail-pack-qty], [data-wholesale-qty]');
     if (input) syncTypedQty(input);
 });
 document.getElementById('cartRows').addEventListener('input', function (e) {
+    if (e.target.closest('[data-price-field]')) return;
     var commissionInput = e.target.closest('[data-commission-price]');
     if (commissionInput) {
         var commissionId = commissionInput.dataset.commissionPrice;
@@ -931,6 +958,20 @@ OfflineOrders.wireForm(document.getElementById('orderForm'), {
         return '';
     },
     onQueued: function (payload) {
+        // Receipt from the cart, built before the cart is cleared below.
+        var receipt = null;
+        try {
+            var lines = [], sum = 0;
+            Object.keys(cart).forEach(function (id) {
+                var p = PRODUCTS[id], c = cart[id];
+                if (!p || !c || PC.isEmpty(c)) return;
+                var amt = PC.lineTotal(p, c); sum += amt;
+                lines.push({ name: p.name, qty: Math.round(PC.stockUsed(p, c) * 100) / 100, amount: amt });
+            });
+            var disc = parseFloat(payload.discount_amount) || 0, extra = parseFloat(payload.additional_charges) || 0;
+            receipt = { shop: (window.POS_OFFLINE || {}).shop, title: 'Credit sale', lines: lines,
+                total: Math.max(0, sum - disc) + extra, method: 'Credit (unpaid)', customer: payload.table_name || '' };
+        } catch (ignored) {}
         // Reflect the sold items locally so this device doesn't oversell the
         // same stock again before it's back online and synced.
         try {
@@ -940,11 +981,23 @@ OfflineOrders.wireForm(document.getElementById('orderForm'), {
                 if (p) { p.stock = Math.max(0, (p.stock || 0) - (parseFloat(line.quantity) || 0)); }
             });
         } catch (ignored) {}
-        alert('No internet right now — this sale has been saved on this device and will sync automatically once you\'re back online.');
         cart = {};
         render();
         updateProductModeDisplay();
+        if (receipt) { OfflineOrders.showReceipt(receipt); }
+        else { OfflineOrders.toast('No internet right now — this sale has been saved on this device and will sync automatically once you\'re back online.'); }
     }
+});
+
+// Offline sales not yet synced still count against stock, even after a reload.
+// Offline: don't block a sale on the device's (possibly out of date) stock.
+if (window.AppOnline) AppOnline.onChange(function (on) { PC.setIgnoreStock(!on); render(); });
+OfflineOrders.pendingStockDeltas().then(function (deltas) {
+    var changed = false;
+    Object.keys(deltas).forEach(function (id) {
+        if (PRODUCTS[id]) { PRODUCTS[id].stock = Math.max(0, (PRODUCTS[id].stock || 0) - deltas[id]); changed = true; }
+    });
+    if (changed) { render(); updateProductModeDisplay(); }
 });
 
 var barcodeScan = document.getElementById('barcodeScan');
@@ -968,7 +1021,7 @@ if (barcodeScan) {
             var id = BARCODES[code];
             var p = PRODUCTS[id];
             if (p) {
-                if (PC.stockUsed(p, cart[id] || PC.buckets()) >= p.stock) {
+                if (PC.stockUsed(p, cart[id] || PC.buckets()) >= PC.stockOf(p)) {
                     flashScan(p.name + ' — no more in stock.', false);
                     return;
                 }
@@ -994,7 +1047,7 @@ if (barcodeScan) {
             p.packPrice=parseFloat(p.packPrice!=null?p.packPrice:p.packSize)||0;
             p.packageBuying=parseFloat(p.packageBuying!=null?p.packageBuying:p.packagingbying)||0;
             var id=String(p.id);PRODUCTS[id]=PRODUCTS[id]||p;BARCODES[code]=id;
-            if(PC.stockUsed(PRODUCTS[id],cart[id]||PC.buckets())>=PRODUCTS[id].stock){flashScan(p.name+' — no more in stock.',false);return;}
+            if(PC.stockUsed(PRODUCTS[id],cart[id]||PC.buckets())>=PC.stockOf(PRODUCTS[id])){flashScan(p.name+' — no more in stock.',false);return;}
             add(id);flashScan(p.name+' added.',true);
           });
     });

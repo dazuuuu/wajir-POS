@@ -31,7 +31,11 @@ $pdo  = Database::pdo();
 $auth = new AuthService($pdo);
 $error = '';
 $notice = '';
-if (($_GET['reset'] ?? '') === '1') {
+if (($_GET['setup'] ?? '') === '1') {
+    $notice = 'Setup complete. Log in with the owner email and password you just created.';
+} elseif (($_GET['owner_changed'] ?? '') === '1') {
+    $notice = 'The shop has a new owner. They can log in now with their email and password.';
+} elseif (($_GET['reset'] ?? '') === '1') {
     $notice = 'Your password has been set. Please sign in with your new password.';
 } elseif (($_GET['denied'] ?? '') === '1') {
     $error = 'You don\'t have access to that page. Please sign in with the right account.';
@@ -60,6 +64,7 @@ $verdict = AccountGuard::evaluate($user);
             session_regenerate_id(true);
             TenantContext::establish($pdo, $user);
             $_SESSION['username']     = $user['username'];
+            $_SESSION['email']        = $user['email'] ?? $email;
             $_SESSION['logged_in']    = true;
             $_SESSION['otp_verified'] = true;  // no 2FA step; kept true so existing guards pass
             $_SESSION['first_login']  = true;
@@ -87,7 +92,7 @@ ob_start();
 <div class="auth-sub">Log in to your shop dashboard.</div>
 <?php if ($error): ?><div class="auth-alert err"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
 <?php if ($notice): ?><div class="auth-alert ok"><?php echo htmlspecialchars($notice); ?></div><?php endif; ?>
-<form method="post" novalidate>
+<form method="post" novalidate id="loginForm">
     <div class="mb-3">
         <label class="form-label">Email</label>
         <input name="email" type="email" class="form-control" value="<?php echo htmlspecialchars($email); ?>" autofocus>
@@ -103,6 +108,10 @@ ob_start();
     <br>
     <a href="<?php echo public_url(''); ?>">Staff? Go to the PIN screen</a>
 </div>
+<script>window.POS_AUTH_BASE = <?php echo json_encode(public_url()); ?>;</script>
+<script src="<?php echo public_url('assets/js/connectivity.js'); ?>"></script>
+<script src="<?php echo public_url('assets/js/offline-auth.js'); ?>"></script>
+<script>PosAuth.wireLoginForm(document.getElementById('loginForm'));</script>
 <?php
 $content = ob_get_clean();
 include ROOT_PATH . '/public/templates/auth/layout.php';

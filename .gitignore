@@ -21,3 +21,15 @@ app/config/database.local.php
 
 # Dependency directory lives at app/vendor/ and IS committed intentionally
 # (this host has no composer CLI access) — do not ignore it.
+
+# Written by /setup/ on the server once the owner exists — never upload.
+/app/config/setup.lock
+/desktop/
+/HOST/
+
+# Shop-computer (offline) bundle build output and download cache
+/dist/
+/desktop/.cache/
+*.sqlite-wal
+*.sqlite-shm
+

@@ -113,6 +113,23 @@ foreach ($recent as &$r) {
 }
 unset($r);
 
+// ---- Figures for the stat tiles and rings at the top ----
+$dashTid = (int) TenantContext::tenantId();
+$dashCount = static function (string $sql) use ($pdo, $dashTid): int {
+    try { $st = $pdo->prepare($sql); $st->execute([$dashTid]); return (int) $st->fetchColumn(); } catch (Throwable $e) { return 0; }
+};
+$dashProducts = $dashCount("SELECT COUNT(*) FROM products WHERE tenant_id = ? AND status = 'active'");
+$dashCustomers = $dashCount('SELECT COUNT(*) FROM customers WHERE tenant_id = ?');
+$dashPct = static fn(float $part, float $whole): int => $whole > 0 ? (int) max(0, min(100, round($part / $whole * 100))) : 0;
+$dashWeekRevenue = (float) ($weekSum['revenue'] ?? 0);
+$dashWeekCollected = (float) ($weekSum['collected'] ?? $dashWeekRevenue);
+$dashGauges = [
+    ['Profit margin', $dashPct(max(0, $weekNetProfit), $dashWeekRevenue), 'blue', 'of sales this week'],
+    ['Collected', $dashPct($dashWeekCollected, $dashWeekRevenue), 'red', 'of this week\'s sales paid'],
+    ['Stock healthy', $dashProducts > 0 ? $dashPct($dashProducts - count($lowStock), $dashProducts) : 0, 'teal', count($lowStock) . ' product' . (count($lowStock) === 1 ? '' : 's') . ' running low'],
+    ['Cash share', $dashPct((float) ($weekSum['cash'] ?? 0), max($dashWeekCollected, 0.01)), 'yellow', 'of payments in cash'],
+];
+
 $page_title = 'Dashboard';
 $shop = $__tenant['name'] ?? 'your shop';
 $userName = $_SESSION['username'] ?? 'Admin';
@@ -129,6 +146,45 @@ $limitPct = min(100, round(($weekSum['revenue'] / $limitTarget) * 100));
 ob_start();
 $icon = fn(string $n, int $s = 18) => NavIcons::svg($n, $s);
 ?>
+<?php if (TenantContext::role() === 'tenant_owner' && !Desktop::enabled()): ?>
+<div id="offlineAppBanner" class="d-flex align-items-center gap-3 flex-wrap mb-3 p-3"
+     style="background:#fff;border-radius:2px;">
+  <i class="fab fa-windows" style="font-size:1.8rem;"></i>
+  <div class="flex-grow-1" style="min-width:200px;">
+    <div class="fw-bold">New: the offline Windows app</div>
+    <div class="small text-muted">Run the POS on the shop computer with no internet at all — download it and follow the step-by-step guide.</div>
+  </div>
+  <a class="btn btn-primary btn-sm" href="<?php echo public_url('download/'); ?>"><i class="fas fa-download me-1"></i>Download &amp; install guide</a>
+  <button type="button" class="btn btn-sm btn-link text-muted p-0" aria-label="Hide" title="Hide"
+          onclick="try{localStorage.setItem('posHideOfflineAppBanner','1')}catch(e){}this.parentNode.remove();">&times;</button>
+</div>
+<script>try{if(localStorage.getItem('posHideOfflineAppBanner')==='1'){document.getElementById('offlineAppBanner').remove();}}catch(e){}</script>
+<?php endif; ?>
+<div class="trk-stats">
+  <a class="trk-stat red" href="<?php echo public_url('super/sales/?period=today'); ?>"><div class="ic"><i class="fas fa-receipt"></i></div>
+    <div class="tx"><div class="num"><?php echo number_format((int) $todaySum['count']); ?></div><div class="lbl">Sales today</div></div></a>
+  <a class="trk-stat orange" href="<?php echo public_url('super/shop/'); ?>"><div class="ic"><i class="fas fa-cart-shopping"></i></div>
+    <div class="tx"><div class="num"><?php echo number_format((float) $todaySum['revenue'], 0); ?></div><div class="lbl">Revenue today (<?php echo htmlspecialchars($currency); ?>)</div></div></a>
+  <a class="trk-stat blue" href="<?php echo public_url('super/customers/'); ?>"><div class="ic"><i class="fas fa-users"></i></div>
+    <div class="tx"><div class="num"><?php echo number_format($dashCustomers); ?></div><div class="lbl">Customers</div></div></a>
+  <a class="trk-stat green" href="<?php echo public_url('super/inventory/'); ?>"><div class="ic"><i class="fas fa-boxes-stacked"></i></div>
+    <div class="tx"><div class="num"><?php echo number_format($dashProducts); ?></div><div class="lbl">Products in stock list</div></div></a>
+</div>
+
+<div class="trk-gauges">
+  <?php foreach ($dashGauges as [$gTitle, $gPct, $gColor, $gNote]): $circ = 2 * M_PI * 46; ?>
+    <div class="trk-gauge <?php echo $gColor; ?>">
+      <h3><?php echo htmlspecialchars($gTitle); ?></h3>
+      <div class="trk-ring">
+        <svg viewBox="0 0 104 104" aria-hidden="true"><circle class="bg" cx="52" cy="52" r="46"></circle>
+          <circle class="fg" cx="52" cy="52" r="46" stroke-dasharray="<?php echo round($circ, 2); ?>" stroke-dashoffset="<?php echo round($circ * (1 - $gPct / 100), 2); ?>"></circle></svg>
+        <div class="val"><?php echo $gPct; ?>%</div>
+      </div>
+      <small><?php echo htmlspecialchars($gNote); ?></small>
+    </div>
+  <?php endforeach; ?>
+</div>
+
 <div class="dashboard-home">
     <div class="fin-greeting d-flex justify-content-between align-items-start gap-3 flex-wrap">
       <div>

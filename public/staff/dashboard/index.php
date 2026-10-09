@@ -122,12 +122,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $heldOrderId = (int) ($_POST['held_order_id'] ?? 0);
     if (!is_array($cart)) { $cart = []; }
     $items = [];
+    // Only the owner may change a price for one sale.
+    $canAdjustPrice = TenantContext::role() === 'tenant_owner';
     foreach ($cart as $c) {
-        $items[] = [
+        $line = [
             'product_id' => (int) ($c['product_id'] ?? 0),
             'quantity' => (float) ($c['quantity'] ?? 0),
             'price_type' => $normalizePriceType($c['price_type'] ?? 'retail'),
         ];
+        if ($canAdjustPrice && isset($c['override_total']) && is_numeric($c['override_total']) && (float) $c['override_total'] >= 0) {
+            $line['override_total'] = round((float) $c['override_total'], 2);
+        }
+        $items[] = $line;
     }
 
     if ($action === 'hold') {
@@ -153,7 +159,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         foreach ($items as $it) {
             $prod = $byId[$it['product_id']] ?? null;
             $lineSaleType = $normalizePriceType($it['price_type'] ?? 'retail');
-            if ($prod) { $subtotal += Pricing::lineTotal($prod, (float) $it['quantity'], $lineSaleType); }
+            if ($prod) {
+                $subtotal += isset($it['override_total'])
+                    ? (float) $it['override_total']
+                    : Pricing::lineTotal($prod, (float) $it['quantity'], $lineSaleType);
+            }
         }
         $subtotal = round($subtotal, 2);
         // Negotiated discount — clamp so a typo can't produce a negative total.
@@ -185,6 +195,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = 'Cash given is less than the cash portion.';
         } else {
             $openRes = $OR->open([
+                'allow_oversell' => !empty($_POST['_offline']), // made at the counter while offline
                 'table_name' => $customerName,
                 'opened_by' => TenantContext::userId(),
                 'items' => $items,
@@ -321,7 +332,7 @@ ob_start();
         <span>All</span>
       </button>
       <?php foreach ($categories as $c): ?>
-        <button type="button" class="pos-cat" data-cat="<?php echo (int) $c['id']; ?>">
+        <button type="button" class="pos-cat" data-cat="<?php echo (int) $c['id']; ?>" title="<?php echo htmlspecialchars($c['name']); ?>">
           <span class="pos-cat-img">
             <?php if (!empty($c['image_path'])): ?>
               <img src="<?php echo htmlspecialchars($c['image_path']); ?>" alt="">
@@ -339,7 +350,7 @@ ob_start();
         <span>All</span>
       </button>
       <?php foreach ($brands as $pub): ?>
-        <button type="button" class="pos-cat" data-cat="<?php echo (int) $pub['id']; ?>">
+        <button type="button" class="pos-cat" data-cat="<?php echo (int) $pub['id']; ?>" title="<?php echo htmlspecialchars($pub['name']); ?>">
           <span class="pos-cat-img"><i class="fas fa-building"></i></span>
           <span><?php echo htmlspecialchars($pub['name']); ?></span>
         </button>
@@ -802,6 +813,16 @@ ob_start();
 .pos-cat-img img { width: 100%; height: 100%; object-fit: cover; }
 .pos-cat.active { border-color: var(--pos-green); color: var(--pos-green); background: var(--pos-green-light); }
 .pos-cat.active .pos-cat-img, .pos-cat.active .pos-cat-all { background: #fff; color: var(--pos-green); }
+/* Long category names ("Baby & Personal Hygiene") wrap to two lines inside
+   their own card instead of spilling into the next one. */
+.pos-cat { width: 96px; white-space: normal; }
+.pos-cat > span:last-child {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
+  overflow: hidden; max-width: 100%; text-align: center; line-height: 1.2; overflow-wrap: anywhere;
+}
+/* Mode buttons: shrink the text rather than overflow on narrow screens. */
+.pos-mode { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 480px) { .pos-mode { font-size: .74rem; padding: 9px 4px; } }
 
 .pos-mode-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0 0 16px; }
 .pos-mode {
@@ -1160,6 +1181,7 @@ ob_start();
 <script src="<?php echo htmlspecialchars(public_url('assets/js/pos-pack-cart.js')); ?>"></script>
 <script>
 var PC = window.PosPackCart;
+var CAN_ADJUST_PRICE = <?php echo TenantContext::role() === 'tenant_owner' ? 'true' : 'false'; ?>;
 var PRODUCT_COMMISSION_ENABLED = <?php echo !empty($tenantRow['product_commission_enabled']) ? 'true' : 'false'; ?>;
 var PRODUCTS = {};
 var BARCODES = {};
@@ -1344,10 +1366,9 @@ function attachCustomerLookup() {
         var q = input.value.trim();
         if (!q) { hide(); return; }
         timer = setTimeout(function(){
-            fetch(CUSTOMER_SEARCH_URL + '?q=' + encodeURIComponent(q) + '&limit=8')
-                .then(function(r){ return r.json(); })
-                .then(function(data){ renderSuggest(data.items || []); })
-                .catch(function(){});
+            if (window.AppOnline && !AppOnline.isOnline()) { hide(); return; }
+            safeFetchJson(CUSTOMER_SEARCH_URL + '?q=' + encodeURIComponent(q) + '&limit=8', { timeoutMs: 5000 })
+                .then(function(data){ renderSuggest((data && data.items) || []); });
         }, 180);
     });
     input.addEventListener('blur', function(){ setTimeout(hide, 160); });
@@ -1518,14 +1539,16 @@ function render() {
             var profit = Math.round((lineTotal - lineCost(p, c)) * 100) / 100;
             var rows = '';
             if ((c.retail || 0) > 0) {
-                rows += PC.qtyRow(id, 'Retail item', money(PC.productPrice(p, 'retail')) + '/item', 'retail', c.retail || 0, retailMax);
+                rows += PC.qtyRow(id, 'Retail item', money(PC.shownPrice(p, c, 'retail')) + '/item', 'retail', c.retail || 0, retailMax);
             }
             if ((c.retailPack || 0) > 0 && PC.hasRetailPack(p)) {
-                rows += PC.qtyRow(id, 'Retail box', money(PC.productPrice(p, 'retail_pack')) + '/' + PC.packLabel(p), 'retailPack', c.retailPack || 0, retailPackMax);
+                rows += PC.qtyRow(id, 'Retail box', money(PC.shownPrice(p, c, 'retailPack')) + '/' + PC.packLabel(p), 'retailPack', c.retailPack || 0, retailPackMax);
             }
             if ((c.wholesale || 0) > 0) {
-                rows += PC.qtyRow(id, 'Wholesale', money(PC.productPrice(p, 'wholesale')) + '/' + wLabel, 'wholesale', c.wholesale || 0, wholesaleMax);
+                rows += PC.qtyRow(id, 'Wholesale', money(PC.shownPrice(p, c, 'wholesale')) + '/' + wLabel, 'wholesale', c.wholesale || 0, wholesaleMax);
             }
+            // Owner only: change the price for this sale (saved prices stay as they are).
+            var priceEdit = CAN_ADJUST_PRICE ? PC.priceEditor(p, c, id) : { inline: '', block: '' };
             if (PRODUCT_COMMISSION_ENABLED && (c.retail || 0) > 0) {
                 rows += '<label class="pos-dual-row"><span class="pos-dual-label">Commission selling price'
                   + ' <span class="text-muted">(minimum ' + money(p.price) + ')</span></span>'
@@ -1544,7 +1567,9 @@ function render() {
               +     (c.retail > 0 && Math.abs((c.retail % 1) - 0.5) < 0.001 ? ' · retail ' + formatHalfQty(c.retail) : '')
               +     (c.retailPack > 0 && Math.abs((c.retailPack % 1) - 0.5) < 0.001 ? ' · box ' + formatHalfQty(c.retailPack) : '')
               +     (c.wholesale > 0 && Math.abs((c.wholesale % 1) - 0.5) < 0.001 ? ' · wholesale ' + formatHalfQty(c.wholesale) : '')
-              +     ((PC.hasRetailPack(p) || PC.hasWholesalePack(p)) ? ' <span class="text-muted small">· stock used ' + PC.stockUsed(p, c) + '</span>' : '') + '</div>'
+              +     ((PC.hasRetailPack(p) || PC.hasWholesalePack(p)) ? ' <span class="text-muted small">· stock used ' + PC.stockUsed(p, c) + '</span>' : '')
+              +     priceEdit.inline + '</div>'
+              +   priceEdit.block
               + '</div>'
               + '<button type="button" class="pos-cart-del" data-del="' + id + '" title="Remove item"><i class="fas fa-trash"></i></button>';
             wrap.appendChild(line);
@@ -1606,11 +1631,21 @@ document.getElementById('cartRows').addEventListener('click', function (e) {
         render();
     }
 });
+if (CAN_ADJUST_PRICE) {
+    PC.wirePriceEditor(document.getElementById('cartRows'), {
+        products: PRODUCTS,
+        getLine: ensureCart,
+        render: render,
+        live: function () { document.getElementById('cartInput').value = JSON.stringify(serializeCart()); updateTotals(); }
+    });
+}
 document.getElementById('cartRows').addEventListener('change', function (e) {
+    if (e.target.closest('[data-price-field]')) return;
     var input = e.target.closest('[data-retail-qty], [data-retail-pack-qty], [data-wholesale-qty]');
     if (input) syncTypedQty(input);
 });
 document.getElementById('cartRows').addEventListener('input', function (e) {
+    if (e.target.closest('[data-price-field]')) return;
     var commissionInput = e.target.closest('[data-commission-price]');
     if (commissionInput) {
         var commissionId = commissionInput.dataset.commissionPrice;
@@ -1719,7 +1754,7 @@ if (holdBtn) {
             }, 300);
         } else {
             document.getElementById('formAction').value = 'hold';
-            document.getElementById('orderForm').submit();
+            submitOrderForm();
         }
     });
 }
@@ -1732,7 +1767,7 @@ if (btnConfirmHold) {
             custInput.value = note;
         }
         document.getElementById('formAction').value = 'hold';
-        document.getElementById('orderForm').submit();
+        submitOrderForm();
     });
 }
 
@@ -1749,7 +1784,7 @@ document.querySelectorAll('.js-resume-held').forEach(function (btn) {
                 afterInput.name = 'resume_after';
                 afterInput.value = id;
                 document.getElementById('orderForm').appendChild(afterInput);
-                document.getElementById('orderForm').submit();
+                submitOrderForm();
                 return;
             }
         }
@@ -1850,19 +1885,79 @@ document.querySelectorAll('input[name=pm]').forEach(function (r) { r.addEventLis
     document.getElementById(id).addEventListener('change', updatePayFields);
 });
 
-document.getElementById('orderForm').addEventListener('submit', function (e) {
-    if (this.dataset.submitting === '1') { e.preventDefault(); return; }
-    if (!cartHasItems()) { e.preventDefault(); alert('Add at least one product.'); return; }
-    if (document.getElementById('formAction').value === 'pay') {
-        var m = payMethod(), t = total().total;
-        if (m === 'cash' && (parseFloat(document.getElementById('cashGivenInput').value) || 0) < t) { e.preventDefault(); alert('Cash given is less than the total.'); return; }
-        if (m === 'split') {
-            var cp = parseFloat(document.getElementById('cashPortionInput').value) || 0, mp = parseFloat(document.getElementById('mpesaPortionInput').value) || 0;
-            if (Math.abs(cp + mp - t) > 0.01) { e.preventDefault(); alert('Cash and M-Pesa portions must add up to the total.'); return; }
+// Pay / hold go through the shared offline-aware submit: online it behaves
+// exactly like a normal form post; with no connection the sale is saved on
+// this device and synced automatically once the internet is back.
+function submitOrderForm() {
+    var f = document.getElementById('orderForm');
+    // requestSubmit() fires the submit event (and so the offline handling);
+    // plain submit() would skip it.
+    if (f.requestSubmit) { f.requestSubmit(); } else { f.submit(); }
+}
+OfflineOrders.wireForm(document.getElementById('orderForm'), {
+    validate: function () {
+        if (!cartHasItems()) { return 'Add at least one product.'; }
+        if (document.getElementById('formAction').value === 'pay') {
+            var m = payMethod(), t = total().total;
+            if (m === 'cash' && (parseFloat(document.getElementById('cashGivenInput').value) || 0) < t) { return 'Cash given is less than the total.'; }
+            if (m === 'split') {
+                var cp = parseFloat(document.getElementById('cashPortionInput').value) || 0, mp = parseFloat(document.getElementById('mpesaPortionInput').value) || 0;
+                if (Math.abs(cp + mp - t) > 0.01) { return 'Cash and M-Pesa portions must add up to the total.'; }
+            }
+        }
+        return '';
+    },
+    onQueued: function (payload) {
+        var held = payload.action === 'hold';
+        var receipt = null;
+        if (!held) {
+            // Build the receipt from the cart before it's cleared below.
+            try {
+                var lines = [];
+                Object.keys(cart).forEach(function (id) {
+                    var p = PRODUCTS[id], c = cart[id];
+                    if (!p || !c || PC.isEmpty(c)) return;
+                    lines.push({ name: p.name, qty: Math.round(PC.stockUsed(p, c) * 100) / 100, amount: PC.lineTotal(p, c) });
+                });
+                var methodLabels = { cash: 'Cash', mpesa: 'M-Pesa', split: 'Cash + M-Pesa', card: 'Card', bank: 'Bank', sacco: 'SACCO', credit: 'Credit' };
+                receipt = { shop: (window.POS_OFFLINE || {}).shop, title: 'Sale', lines: lines, total: total().total,
+                    method: methodLabels[payMethod()] || payMethod(), customer: (document.getElementById('customerName') || {}).value || '' };
+            } catch (ignored) {}
+        }
+        if (!held) {
+            // Reflect the sale locally so this device can't oversell before it syncs.
+            try {
+                JSON.parse(payload.cart || '[]').forEach(function (line) {
+                    var p = PRODUCTS[String(line.product_id)];
+                    if (p) { p.stock = Math.max(0, (p.stock || 0) - (parseFloat(line.quantity) || 0)); }
+                });
+            } catch (ignored) {}
+        }
+        document.getElementById('formAction').value = 'pay';
+        cart = {};
+        render();
+        updateProductModeDisplay();
+        if (held) {
+            OfflineOrders.toast('No internet right now — this hold has been saved on this device and will sync automatically once you\'re back online.');
+        } else if (receipt) {
+            OfflineOrders.showReceipt(receipt);
+        } else {
+            OfflineOrders.toast('No internet right now — this sale has been saved on this device and will sync automatically once you\'re back online.');
         }
     }
-    this.dataset.submitting = '1';
-    this.querySelectorAll('button[type=submit]').forEach(function(button){button.disabled=true;});
+});
+
+// Sales made offline but not yet synced still count against stock, even
+// after a reload (an offline reload shows the saved page with its saved
+// stock levels).
+// Offline: don't block a sale on the device's (possibly out of date) stock.
+if (window.AppOnline) AppOnline.onChange(function (on) { PC.setIgnoreStock(!on); render(); });
+OfflineOrders.pendingStockDeltas().then(function (deltas) {
+    var changed = false;
+    Object.keys(deltas).forEach(function (id) {
+        if (PRODUCTS[id]) { PRODUCTS[id].stock = Math.max(0, (PRODUCTS[id].stock || 0) - deltas[id]); changed = true; }
+    });
+    if (changed) { render(); updateProductModeDisplay(); }
 });
 
 // Shop VAT settings from the owner Settings page
@@ -1897,7 +1992,17 @@ if (barcodeScan) {
         var code = barcodeScan.value.trim();
         barcodeScan.value = '';
         if (!code) { return; }
-        fetch(<?php echo json_encode(public_url('api/inventory/pos_barcode.php')); ?> + '?code=' + encodeURIComponent(code))
+        // Every product on this till is already loaded with its barcode, so
+        // look it up locally first — no network needed, works offline.
+        if (BARCODES[code] && PRODUCTS[BARCODES[code]]) {
+            var localId = BARCODES[code];
+            var localP = PRODUCTS[localId];
+            if (PC.stockUsed(localP, cart[localId] || PC.buckets()) >= PC.stockOf(localP)) { flashScan(localP.name + ' — no more in stock.', false); return; }
+            add(localId); flashScan(localP.name + ' added.', true);
+            return;
+        }
+        if (window.AppOnline && !AppOnline.isOnline()) { flashScan('Offline — that barcode isn\'t on this till yet. Search the product list instead.', false); return; }
+        OfflineOrders.fetchWithTimeout(<?php echo json_encode(public_url('api/inventory/pos_barcode.php')); ?> + '?code=' + encodeURIComponent(code), {}, 6000)
           .then(function(r){return r.json();})
           .then(function(data){
             var p=data.item||(data.items&&data.items[0]);if(!p){flashScan('No in-stock product with that barcode.',false);return;}
@@ -1907,7 +2012,7 @@ if (barcodeScan) {
             p.packPrice=parseFloat(p.packPrice!=null?p.packPrice:p.packSize)||0;
             p.packageBuying=parseFloat(p.packageBuying!=null?p.packageBuying:p.packagingbying)||0;
             var id=String(p.id);PRODUCTS[id]=PRODUCTS[id]||p;BARCODES[code]=id;
-            if(PC.stockUsed(PRODUCTS[id],cart[id]||PC.buckets())>=PRODUCTS[id].stock){flashScan(p.name+' — no more in stock.',false);return;}
+            if(PC.stockUsed(PRODUCTS[id],cart[id]||PC.buckets())>=PC.stockOf(PRODUCTS[id])){flashScan(p.name+' — no more in stock.',false);return;}
             add(id);flashScan(p.name+' added.',true);
           }).catch(function(){flashScan('Could not read barcode. Try again.',false);});
     });

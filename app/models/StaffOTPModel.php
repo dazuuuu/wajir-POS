@@ -6,11 +6,11 @@ use PDO;
 
 class StaffOTPModel extends Model
 {
-    private PDO $db;
-    
-    public function __construct(PDO $db)
+    protected string $table = 'staff_otp_verification';
+
+    public function __construct(?PDO $db = null)
     {
-        $this->db = $db;
+        parent::__construct($db);
     }
     
     /**

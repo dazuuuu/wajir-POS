@@ -67,25 +67,26 @@ if ($format === 'csv') {
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="customer-report-' . preg_replace('/[^a-z0-9]+/i', '-', $name) . '.csv"');
     $out = fopen('php://output', 'w');
-    fputcsv($out, ['Customer', $name]);
-    if ($company !== '') fputcsv($out, ['Company', $company]);
-    fputcsv($out, ['Open balance', number_format($openBalance, 2, '.', '')]);
-    fputcsv($out, ['Total paid (recorded)', number_format($totalPaid, 2, '.', '')]);
-    fputcsv($out, []);
-    fputcsv($out, ['OPEN INVOICES']);
-    fputcsv($out, ['Date', 'Invoice no', 'Amount']);
+    $csv = static fn(array $row) => fputcsv($out, $row, ',', '"', '\\');
+    $csv(['Customer', $name]);
+    if ($company !== '') $csv(['Company', $company]);
+    $csv(['Open balance', number_format($openBalance, 2, '.', '')]);
+    $csv(['Total paid (recorded)', number_format($totalPaid, 2, '.', '')]);
+    $csv([]);
+    $csv(['OPEN INVOICES']);
+    $csv(['Date', 'Invoice no', 'Amount']);
     foreach ($open as $inv) {
-        fputcsv($out, [
+        $csv([
             date('Y-m-d', strtotime($inv['created_at'])),
             $inv['receipt_number'] ?? '',
             number_format($inv['_due'], 2, '.', ''),
         ]);
     }
-    fputcsv($out, []);
-    fputcsv($out, ['PAYMENTS']);
-    fputcsv($out, ['Date', 'Invoice no', 'Mode of payment', 'Amount paid']);
+    $csv([]);
+    $csv(['PAYMENTS']);
+    $csv(['Date', 'Invoice no', 'Mode of payment', 'Amount paid']);
     foreach ($payments as $pay) {
-        fputcsv($out, [
+        $csv([
             date('Y-m-d H:i', strtotime($pay['created_at'])),
             $pay['receipt_number'] ?? '',
             PaymentOptions::label($pay),

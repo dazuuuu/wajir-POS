@@ -31,9 +31,9 @@ require_once __DIR__ . '/../../../app/helpers/PathConfig.php';
 require_once __DIR__ . '/../../../app/helpers/ReceiptFooter.php';
 
 // Brand contact details (single source of truth — used here and in the footer).
-$ismanPhone = ReceiptFooter::SHOP_PHONE;
-$ismanEmail = ReceiptFooter::SHOP_EMAIL;
-$ismanLoc   = ReceiptFooter::SHOP_LOCATION;
+$ismanPhone = ReceiptFooter::contact('phone');
+$ismanEmail = ReceiptFooter::contact('business_email');
+$ismanLoc   = ReceiptFooter::contact('address');
 
 $logoPath = public_url('assets/images/logo/logo.png');
 $logoExists = isset($_SERVER['DOCUMENT_ROOT'])

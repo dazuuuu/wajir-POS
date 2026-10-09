@@ -3,20 +3,30 @@
 
 class ReceiptFooter
 {
-    public const SHOP_NAME = 'DUAQABE GENERAL STORE LIMITED';
-    public const SHOP_BOX = 'P.O.BOX 631-00610, NAIROBI';
-    public const SHOP_LOCATION = 'Haji adar plaza WAJIR';
-    public const SHOP_EMAIL = 'duaqabegeneralstore@gmail.com';
-    public const SHOP_PHONE = '0721713350,0711257332';
+    // No built-in shop details: everything printed comes from Settings.
+    // These are only the fallbacks for fields left empty there.
+    public const SHOP_NAME = 'My Shop';
+    public const SHOP_BOX = '';
+    public const SHOP_LOCATION = '';
+    public const SHOP_EMAIL = '';
+    public const SHOP_PHONE = '';
 
     public const DEFAULT_LINES = [
-        'For questions and enquiries:',
-        self::SHOP_EMAIL,
-        self::SHOP_PHONE,
         'GOODS ONCE SOLD ARE NOT REACCEPTED',
         '!THANK YOU FOR VISITING OUR BUSINESS!',
         '!!WELCOME!!',
     ];
+
+    /** Default footer for this shop: its own email/phone from Settings, then the closing lines. */
+    public static function defaultText(?array $tenant): string
+    {
+        $contact = array_values(array_filter([
+            trim((string) ($tenant['business_email'] ?? '')),
+            trim((string) ($tenant['phone'] ?? '')),
+        ]));
+        $lines = $contact ? array_merge(['For questions and enquiries:'], $contact) : [];
+        return implode("\n", array_merge($lines, self::DEFAULT_LINES));
+    }
 
     /** Resolve footer text from tenant settings (or the shop default). */
     public static function text(?array $tenant): string
@@ -25,7 +35,18 @@ class ReceiptFooter
         if ($custom !== '') {
             return $custom;
         }
-        return implode("\n", self::DEFAULT_LINES);
+        return self::defaultText($tenant);
+    }
+
+    /** One contact detail of the shop (for the public pages): phone, business_email, address. */
+    public static function contact(string $field): string
+    {
+        try {
+            $t = (new Models\TenantModel(Database::pdo()))->primary();
+            return trim((string) ($t[$field] ?? ''));
+        } catch (Throwable $e) {
+            return '';
+        }
     }
 
     /** HTML block for thermal / email receipts. */

@@ -31,7 +31,17 @@
     return 'api/ping.php';
   })();
 
+  /** Tell the service worker, so it serves saved pages at once while offline. */
+  function tellWorker(isOnline) {
+    try {
+      if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({ type: 'NET_STATUS', online: !!isOnline });
+      }
+    } catch (ignored) {}
+  }
+
   function setOnline(next) {
+    tellWorker(next); // on every check, so the worker never acts on a stale state
     if (next === online) return;
     online = next;
     listeners.forEach(function (fn) { try { fn(online); } catch (ignored) {} });
@@ -63,6 +73,18 @@
     });
   }
 
+  /**
+   * A request just failed or ran out of time: treat the connection as down
+   * right away (so the next sale saves instantly instead of waiting) and
+   * check again soon to notice when it's back.
+   */
+  var recheckTimer = null;
+  function markOffline() {
+    setOnline(false);
+    if (recheckTimer) clearTimeout(recheckTimer);
+    recheckTimer = setTimeout(function () { recheckTimer = null; checkNow(); }, 8000);
+  }
+
   function onChange(fn) {
     listeners.push(fn);
     fn(online);
@@ -92,12 +114,16 @@
     checkNow();
     // Re-check periodically — catches the "wifi icon says connected but
     // there's no actual internet" case, and recovery after an outage even
-    // if the browser never fires its own online/offline events.
-    setInterval(checkNow, 20000);
+    // if the browser never fires its own online/offline events. Faster
+    // while offline, so sales start syncing soon after it's back.
+    (function loop() {
+      setTimeout(function () { checkNow().then(loop, loop); }, online ? 20000 : 10000);
+    })();
   });
 
   global.AppOnline = {
     isOnline: function () { return online; },
+    markOffline: markOffline,
     onChange: onChange,
     checkNow: checkNow
   };

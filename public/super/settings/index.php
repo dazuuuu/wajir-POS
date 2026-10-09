@@ -9,7 +9,7 @@ $tenantId = TenantContext::tenantId();
 $tenantModel = new Models\TenantModel($pdo);
 $tenantModel->ensureShopSchema();
 
-$defaultFooter = implode("\n", ReceiptFooter::DEFAULT_LINES);
+$defaultFooter = ''; // set once the shop is loaded below
 $defaultPaymentCredentials = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -97,6 +97,7 @@ function save_tenant_logo(array $file, int $tenantId): array
 }
 
 $__tenant = $tenantModel->find($tenantId);
+$defaultFooter = ReceiptFooter::defaultText($__tenant ?: null);
 $moduleDefinitions = Modules::definitions();
 $rawModules = $__tenant['enabled_modules'] ?? null;
 $selectedModules = Modules::selection($rawModules);
@@ -277,8 +278,12 @@ ob_start();
     <div class="card border-0 shadow-sm" style="border-radius:12px;">
       <div class="card-body text-center p-4">
         <div class="text-muted small text-uppercase mb-2">Current logo</div>
+        <?php if (Branding::tenantLogo($__tenant)): ?>
         <img src="<?php echo htmlspecialchars(Branding::tenantLogo($__tenant)); ?>"
              alt="Logo" style="max-height:90px;max-width:100%;object-fit:contain;">
+        <?php else: ?>
+        <div class="text-muted py-3"><i class="fas fa-image fa-2x d-block mb-2" style="opacity:.3;"></i>No logo uploaded yet</div>
+        <?php endif; ?>
         <div class="text-muted small mt-3">This logo is shown on the login screen, your dashboard, and receipts.</div>
       </div>
     </div>

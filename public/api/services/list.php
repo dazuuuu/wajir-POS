@@ -6,7 +6,6 @@ header('Access-Control-Allow-Origin: *');
 require_once '../../../app/config/db_connect.php';
 require_once '../../../app/models/ServiceModel.php';
 
-use Models\ServiceModel;
 
 $serviceModel = new ServiceModel($pdo);
 $status = $_GET['status'] ?? 'published';

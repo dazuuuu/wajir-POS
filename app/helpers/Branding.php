@@ -1,31 +1,41 @@
 <?php
 // app/helpers/Branding.php
-// Logo display rules (single-shop deployment):
-//  - Everywhere (login page, dashboards, receipts) -> the shop's uploaded
-//    logo from Settings, falling back to the default Duaqabe logo if none
-//    has been uploaded yet.
+// Logo rules (single-shop deployment): the login page, dashboards, sidebar
+// and catalogue show the logo the owner uploaded in Settings (none until
+// one is uploaded). Receipts, invoices and their watermark
+// always print the Duaqabe logo (receiptLogo()).
 // All paths are resolved through public_url() so they work regardless of
 // whether the web server's document root points at the project root or
 // straight at the public/ folder (see app/helpers/PathConfig.php).
 
 class Branding
 {
-    // Default Duaqabe logo, relative to the public web root.
-    const DEFAULT_LOGO_REL = 'assets/images/logo/duaqabe-general-logo-black.png';
+    // The Duaqabe logo printed on receipts and invoices (and as their watermark).
+    const RECEIPT_LOGO_REL = 'assets/images/logo/duaqabe-general-logo-black.png';
 
-    /** The default Modern logo (used when no tenant logo has been uploaded). */
-    public static function loginLogo(): string
+    /** Logo for printed/emailed receipts and invoices: always the Duaqabe logo. */
+    public static function receiptLogo(): string
     {
-        return public_url(self::DEFAULT_LOGO_REL);
+        return public_url(self::RECEIPT_LOGO_REL);
     }
 
-    /** Tenant's own logo for internal pages, receipts, and the login screen; else the default. */
+    /** The shop's uploaded logo, or '' when none has been uploaded. */
+    public static function loginLogo(): string
+    {
+        try {
+            return self::tenantLogo((new Models\TenantModel(Database::pdo()))->primary());
+        } catch (Throwable $e) {
+            return '';
+        }
+    }
+
+    /** This shop's uploaded logo, or '' when none has been uploaded. */
     public static function tenantLogo(?array $tenant): string
     {
         if ($tenant && !empty($tenant['logo_path'])) {
             return public_url(self::normalizeStoredPath($tenant['logo_path']));
         }
-        return self::loginLogo();
+        return '';
     }
 
     /**

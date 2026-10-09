@@ -41,3 +41,8 @@ if (session_status() === PHP_SESSION_NONE) {
 // Rehydrate the current tenant/user/capabilities for this request.
 TenantContext::boot();
 Modules::enforceRequest();
+// A form sent twice with the same one-off key (offline sync, double tap)
+// is recorded once — see app/helpers/Idempotency.php.
+Idempotency::guard();
+// Shop-PC install: one copy of the database per day (see Desktop.php).
+Desktop::dailyBackup();

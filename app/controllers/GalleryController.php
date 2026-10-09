@@ -100,6 +100,11 @@ class GalleryController {
         return true;
     }
     
+    /** Filtered list for the public gallery API (status/category/type/featured/limit/offset). */
+    public function getFiltered(array $filters = []) {
+        return $this->galleryModel->getItems($filters);
+    }
+
     public function getAll($status = 'active', $limit = null, $offset = 0) {
         return $this->galleryModel->getAll($status, $limit, $offset);
     }

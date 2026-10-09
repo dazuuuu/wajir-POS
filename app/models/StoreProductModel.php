@@ -103,11 +103,7 @@ class StoreProductModel extends Model
         $typeSql = $type ? (" AND si.invoice_type = " . $this->db->quote($type)) : "";
         $stmt = $this->db->prepare(
             "SELECT si.*, u.username AS created_by_name,
-                    (SELECT COUNT(*) FROM store_invoice_items sii WHERE sii.invoice_id = si.id) AS item_count,
-                    (SELECT GROUP_CONCAT(
-                        CONCAT(sii.product_name, ' (', RTRIM(RTRIM(FORMAT(sii.quantity, 2), '0'), '.'), ' ', COALESCE(sii.unit, ''), ')')
-                        , ', '
-                     ) FROM store_invoice_items sii WHERE sii.invoice_id = si.id) AS product_summary
+                    (SELECT COUNT(*) FROM store_invoice_items sii WHERE sii.invoice_id = si.id) AS item_count
                FROM store_invoices si
           LEFT JOIN users u ON u.id = si.created_by
               WHERE si.tenant_id = ? {$typeSql}
@@ -115,7 +111,7 @@ class StoreProductModel extends Model
               LIMIT " . (int) $limit
         );
         $stmt->execute([$tid]);
-        return $stmt->fetchAll();
+        return $this->withProductSummary($stmt->fetchAll());
     }
 
     public function returnInvoices(int $limit = 100): array
@@ -131,7 +127,7 @@ class StoreProductModel extends Model
         $shop = ['qty' => 0.0, 'capital' => 0.0, 'lines' => 0];
         try {
             $st = $this->db->prepare(
-                "SELECT COUNT(*) AS lines,
+                "SELECT COUNT(*) AS `lines`,
                         COALESCE(SUM(quantity),0) AS qty,
                         COALESCE(SUM(quantity * COALESCE(buying_price,0)),0) AS capital
                    FROM store_products
@@ -148,7 +144,7 @@ class StoreProductModel extends Model
         }
         try {
             $st = $this->db->prepare(
-                "SELECT COUNT(*) AS lines,
+                "SELECT COUNT(*) AS `lines`,
                         COALESCE(SUM(quantity),0) AS qty,
                         COALESCE(SUM(quantity * COALESCE(buying_price,0)),0) AS capital
                    FROM products
@@ -177,11 +173,7 @@ class StoreProductModel extends Model
         $where = $this->periodSql($period, 'si.created_at');
         $stmt = $this->db->prepare(
             "SELECT si.*, u.username AS created_by_name,
-                    (SELECT COUNT(*) FROM store_invoice_items sii WHERE sii.invoice_id = si.id) AS item_count,
-                    (SELECT GROUP_CONCAT(
-                        CONCAT(sii.product_name, ' (', RTRIM(RTRIM(FORMAT(sii.quantity, 2), '0'), '.'), ' ', COALESCE(sii.unit, ''), ')')
-                        , ', '
-                     ) FROM store_invoice_items sii WHERE sii.invoice_id = si.id) AS product_summary
+                    (SELECT COUNT(*) FROM store_invoice_items sii WHERE sii.invoice_id = si.id) AS item_count
                FROM store_invoices si
           LEFT JOIN users u ON u.id = si.created_by
               WHERE si.tenant_id = ? AND {$where}
@@ -189,7 +181,7 @@ class StoreProductModel extends Model
               LIMIT " . (int) $limit
         );
         $stmt->execute([$tid]);
-        return $stmt->fetchAll();
+        return $this->withProductSummary($stmt->fetchAll());
     }
 
     public function transferTotalForPeriod(string $period = 'all'): float
@@ -1049,5 +1041,30 @@ class StoreProductModel extends Model
             } catch (\PDOException $ignored) {
             }
         }
+    }
+
+    /** Adds product_summary to each store invoice row. */
+    private function withProductSummary(array $rows): array
+    {
+        // "Sugar (2 kg), Rice (1.5 bag)" — built here, not in SQL, because
+        // MySQL and SQLite disagree on RTRIM/GROUP_CONCAT syntax.
+        $ids = array_map(static fn($r) => (int) $r['id'], $rows);
+        $summary = [];
+        if ($ids) {
+            $items = $this->db->prepare(
+                'SELECT invoice_id, product_name, quantity, unit FROM store_invoice_items
+                  WHERE invoice_id IN (' . implode(',', array_fill(0, count($ids), '?')) . ') ORDER BY id'
+            );
+            $items->execute($ids);
+            foreach ($items->fetchAll() as $it) {
+                $qty = rtrim(rtrim(number_format((float) $it['quantity'], 2, '.', ''), '0'), '.');
+                $summary[(int) $it['invoice_id']][] = $it['product_name'] . ' (' . trim($qty . ' ' . ($it['unit'] ?? '')) . ')';
+            }
+        }
+        foreach ($rows as &$r) {
+            $r['product_summary'] = implode(', ', $summary[(int) $r['id']] ?? []);
+        }
+        unset($r);
+        return $rows;
     }
 }

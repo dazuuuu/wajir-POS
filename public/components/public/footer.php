@@ -60,11 +60,13 @@ require_once __DIR__ . '/../../../app/helpers/ReceiptFooter.php';
                 <h6 class="footer-col-title">Contact</h6>
                 <p class="footer-contact-item">
                     <i class="fas fa-envelope"></i>
-                    <a href="mailto:<?php echo htmlspecialchars(ReceiptFooter::SHOP_EMAIL); ?>"><?php echo htmlspecialchars(ReceiptFooter::SHOP_EMAIL); ?></a>
+                    <?php $__fEmail = ReceiptFooter::contact('business_email'); ?>
+                    <a href="mailto:<?php echo htmlspecialchars($__fEmail); ?>"><?php echo htmlspecialchars($__fEmail); ?></a>
                 </p>
                 <p class="footer-contact-item">
                     <i class="fas fa-phone"></i>
-                    <a href="tel:<?php echo preg_replace('/\D+/', '', ReceiptFooter::SHOP_PHONE); ?>"><?php echo htmlspecialchars(ReceiptFooter::SHOP_PHONE); ?></a>
+                    <?php $__fPhone = ReceiptFooter::contact('phone'); ?>
+                    <a href="tel:<?php echo preg_replace('/\D+/', '', $__fPhone); ?>"><?php echo htmlspecialchars($__fPhone); ?></a>
                 </p>
                 <a href="<?php echo public_url('auth/register.php'); ?>" class="btn btn--primary footer-cta-btn">
                     Let's Talk <i class="fas fa-arrow-right"></i>

@@ -563,7 +563,7 @@ ob_start();
       <div class="table-responsive">
         <table class="table table-bordered align-middle mb-0" id="saleTable" style="border-color:#dbe3ee;">
           <thead><tr class="text-muted small text-uppercase">
-            <th>Receipt</th><th>When</th><th>Type</th><th>Staff</th><th>Customer</th><th>Products</th><th>Pay</th><th class="text-end">Total</th><th></th>
+            <th>Receipt</th><th>Date &amp; time</th><th>Type</th><th>Staff</th><th>Customer</th><th>Products</th><th>Pay</th><th class="text-end">Total</th><th></th>
           </tr></thead>
           <tbody>
             <?php $previousDate = null; foreach ($sales as $saleIndex => $s):
@@ -583,7 +583,7 @@ ob_start();
             <?php $previousDate = $saleDate; endif; ?>
             <tr class="sale-ledger-row<?php echo $saleIndex >= 20 ? ' initial-hidden' : ''; ?>" data-search="<?php echo strtolower(htmlspecialchars($s['receipt_number'].' '.$s['staff_name'].' '.($s['customer_name']??'').' '.$itemNames.' '.$categoryNames)); ?>" data-ledger-date="<?php echo htmlspecialchars($saleDate); ?>" <?php echo $saleIndex >= 20 ? 'style="display:none;"' : ''; ?>>
               <td class="fw-semibold small"><?php echo htmlspecialchars($s['receipt_number']); ?></td>
-              <td class="small text-nowrap"><?php echo date('g:i a', strtotime($s['created_at'])); ?></td>
+              <td class="small text-nowrap"><?php echo date('j M Y, g:i a', strtotime($s['created_at'])); ?></td>
               <td><?php echo ($s['source'] ?? 'sale') === 'order' ? '<span class="badge bg-warning text-dark">Tab</span>' : Models\SaleModel::saleTypeBadge($s); ?></td>
               <td class="small"><?php echo htmlspecialchars($s['staff_name'] ?: '—'); ?></td>
               <td class="small">

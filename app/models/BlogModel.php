@@ -325,13 +325,15 @@ class BlogModel {
                 LEFT JOIN users u ON b.author_id = u.id
                 LEFT JOIN blog_categories c ON b.category_id = c.id
                 WHERE b.status = 'published' 
-                AND (b.title LIKE :keyword OR b.content LIKE :keyword OR b.excerpt LIKE :keyword)
+                AND (b.title LIKE :kw1 OR b.content LIKE :kw2 OR b.excerpt LIKE :kw3)
                 ORDER BY b.published_at DESC
                 LIMIT :limit";
         $stmt = $this->db->prepare($sql);
         $keyword = "%$keyword%";
-        $stmt->bindParam(':keyword', $keyword);
-        $stmt->bindParam(':limit', $limit, PDO::PARAM_INT);
+        $stmt->bindValue(':kw1', $keyword);
+        $stmt->bindValue(':kw2', $keyword);
+        $stmt->bindValue(':kw3', $keyword);
+        $stmt->bindValue(':limit', (int) $limit, PDO::PARAM_INT);
         $stmt->execute();
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }

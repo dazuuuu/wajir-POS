@@ -174,7 +174,7 @@ $shareUrl   = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' 
 <!-- Hero -->
 <div class="cat-hero">
     <div class="cat-hero-inner">
-        <img class="cat-logo" src="<?php echo htmlspecialchars($logoUrl); ?>" alt="<?php echo htmlspecialchars($shopName); ?>">
+        <?php if ($logoUrl): ?><img class="cat-logo" src="<?php echo htmlspecialchars($logoUrl); ?>" alt="<?php echo htmlspecialchars($shopName); ?>"><?php endif; ?>
         <div>
             <div class="cat-shop-name"><?php echo htmlspecialchars($shopName); ?></div>
             <div class="cat-shop-meta">
@@ -236,7 +236,7 @@ $shareUrl   = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' 
 
 <!-- Footer -->
 <footer class="cat-footer">
-    Powered by <strong>Modern POS</strong> &mdash; <?php echo htmlspecialchars($shopName); ?>
+    <?php echo htmlspecialchars($shopName); ?>
 </footer>
 
 <script>

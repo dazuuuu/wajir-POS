@@ -53,12 +53,16 @@ class Database
     public static function pdo(): PDO
     {
         if (self::$pdo === null) {
-            // A local override (gitignored, never deployed) always wins over
-            // the production config — see database.local.php's own header
-            // for why: this is what keeps a laptop's dev settings from ever
-            // landing on the live server again.
+            // The local override (database.local.php → the SQLite test copy)
+            // is honoured ONLY on a developer machine: command line, or a
+            // request to localhost/127.0.0.1. On any real domain it's ignored
+            // even if the file got uploaded by mistake — which is exactly what
+            // happened once: the live site silently ran on the "Wajir System
+            // test" SQLite file instead of the real MySQL database.
             $localConfigFile = ROOT_PATH . '/app/config/database.local.php';
-            $cfg = is_file($localConfigFile)
+            $host = strtolower(preg_replace('/:\d+$/', '', (string) ($_SERVER['HTTP_HOST'] ?? '')));
+            $isDevMachine = PHP_SAPI === 'cli' || in_array($host, ['localhost', '127.0.0.1', '::1', '[::1]'], true);
+            $cfg = ($isDevMachine && is_file($localConfigFile))
                 ? require $localConfigFile
                 : require ROOT_PATH . '/app/config/database.php';
 
@@ -71,6 +75,15 @@ class Database
                     PDO::ATTR_EMULATE_PREPARES   => false,                 // real prepared stmts
                 ]);
                 
+                // Several devices at once (the shop PC + phones on its Wi-Fi):
+                // readers don't block the writer, and a busy moment waits
+                // briefly instead of failing with "database is locked".
+                try {
+                    self::$pdo->exec('PRAGMA journal_mode = WAL');
+                    self::$pdo->exec('PRAGMA busy_timeout = 5000');
+                    self::$pdo->exec('PRAGMA synchronous = NORMAL');
+                } catch (Throwable $ignored) {
+                }
                 $funcMethod = method_exists(self::$pdo, 'createFunction') ? 'createFunction' : 'sqliteCreateFunction';
                 self::$pdo->$funcMethod('CURDATE', function() { return date('Y-m-d'); });
                 self::$pdo->$funcMethod('NOW', function() { return date('Y-m-d H:i:s'); });
@@ -103,6 +116,9 @@ class Database
                 // "SYSTEM" (whatever the host happens to be set to), which is
                 // exactly the mismatch that made offers look inactive.
                 self::$pdo->exec("SET time_zone = '+03:00'");
+                // One text collation for every table (see SchemaHeal).
+                require_once __DIR__ . '/SchemaHeal.php';
+                SchemaHeal::collation(self::$pdo, (string) $cfg['dbname']);
             }
         }
         return self::$pdo;

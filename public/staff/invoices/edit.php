@@ -346,6 +346,15 @@ ob_start();
   recalc();
   var editForm = document.getElementById('editInvoiceForm');
   if (editForm) editForm.addEventListener('submit', recalc);
+  // Saving an edit works offline too: queued on this device, applied to the
+  // real invoice automatically once the connection is back.
+  if (editForm && window.OfflineOrders) {
+    OfflineOrders.wireForm(editForm, {
+      onQueued: function () {
+        OfflineOrders.toast('No internet right now — this edit has been saved on this device and will be applied automatically once you\'re back online.');
+      }
+    });
+  }
 })();
 </script>
 <?php

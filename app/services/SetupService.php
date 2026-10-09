@@ -1,5 +1,8 @@
 <?php
 
+// SettingModel is a global (non-namespaced) class the autoloader can't find.
+require_once __DIR__ . '/../models/SettingModel.php';
+
 class SetupService
 {
     private const SCHEMA_VERSION = '2';
@@ -60,7 +63,9 @@ class SetupService
 
         $ran = 0;
         $skipped = 0;
-        $tolerable = [1050, 1060, 1061, 1062, 1091, 1826];
+        // Already exists / duplicate, and 1054: clean-up statements for very old
+        // installs that refer to columns a fresh database never had.
+        $tolerable = [1050, 1054, 1060, 1061, 1062, 1091, 1826];
         foreach ($this->splitSql($sql) as $statement) {
             if (preg_match('/^\s*(CREATE\s+DATABASE|USE)\b/i', $statement)) {
                 $skipped++;
@@ -89,7 +94,7 @@ class SetupService
 
     public function createOwner(array $input, array $modules): array
     {
-        if (!$this->schemaReady()) {
+        if (!$this->schemaReady() && !$this->tablesExist()) {
             return ['ok' => false, 'error' => 'Run the database setup first.'];
         }
         if ($this->owner()) {
@@ -116,7 +121,10 @@ class SetupService
             return ['ok' => false, 'error' => 'That email is already registered.'];
         }
 
-        $lockAcquired = (int) $this->db->query("SELECT GET_LOCK('wajir_pos_owner_setup', 10)")->fetchColumn() === 1;
+        // MySQL: a named lock so two setup tabs can't both create an owner.
+        // SQLite (the shop-PC install) has a single local user — no lock needed.
+        $isSqlite = $this->db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite';
+        $lockAcquired = $isSqlite || (int) $this->db->query("SELECT GET_LOCK('wajir_pos_owner_setup', 10)")->fetchColumn() === 1;
         if (!$lockAcquired) {
             return ['ok' => false, 'error' => 'Another setup request is running. Try again.'];
         }
@@ -153,9 +161,11 @@ class SetupService
             error_log('SetupService::createOwner failed: ' . $e->getMessage());
             return ['ok' => false, 'error' => 'Could not create the owner account: ' . $e->getMessage()];
         } finally {
-            try {
-                $this->db->query("SELECT RELEASE_LOCK('wajir_pos_owner_setup')");
-            } catch (Throwable $ignored) {
+            if (!$isSqlite) {
+                try {
+                    $this->db->query("SELECT RELEASE_LOCK('wajir_pos_owner_setup')");
+                } catch (Throwable $ignored) {
+                }
             }
         }
     }
@@ -171,6 +181,192 @@ class SetupService
         );
         (new SettingModel($this->db))->set('support_setup_locked', '1');
         (new SettingModel($this->db))->set('support_setup_locked_at', date('c'));
+    }
+
+    /** The core tables exist (an already-installed database counts, whatever installed it). */
+    public function tablesExist(): bool
+    {
+        foreach (['roles', 'users', 'user_profiles', 'tenants', 'products', 'orders'] as $table) {
+            try {
+                $this->db->query('SELECT 1 FROM `' . $table . '` LIMIT 1');
+            } catch (Throwable $e) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** Try a connection with the given settings without touching Database::pdo(). */
+    public static function testConnection(array $cfg): array
+    {
+        try {
+            $dsn = sprintf('mysql:host=%s;dbname=%s;charset=utf8mb4', $cfg['host'], $cfg['dbname']);
+            new PDO($dsn, $cfg['username'], $cfg['password'], [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_TIMEOUT => 5]);
+            return ['ok' => true, 'error' => null];
+        } catch (Throwable $e) {
+            return ['ok' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    public static function writeDbConfig(array $cfg): bool
+    {
+        $php = "<?php\n\n// app/config/database.php — written by the /setup/ page on " . date('Y-m-d H:i:s') . ".\n\nreturn "
+            . var_export($cfg, true) . ";\n";
+        return @file_put_contents(APP_ROOT . '/config/database.php', $php) !== false;
+    }
+
+    /** Lock file: once an owner exists the setup page never offers the database form or a new owner again. */
+    public static function lockFile(): string
+    {
+        return APP_ROOT . '/config/setup.lock';
+    }
+
+    public static function writeLock(): void
+    {
+        @file_put_contents(self::lockFile(), 'Owner created ' . date('c') . "\n");
+    }
+
+    private function verifyPassword(int $userId, string $password): bool
+    {
+        $st = $this->db->prepare('SELECT password_hash FROM users WHERE id = ? LIMIT 1');
+        $st->execute([$userId]);
+        $hash = (string) $st->fetchColumn();
+        return $hash !== '' && password_verify($password, $hash);
+    }
+
+    /**
+     * Owner edits their own account. Changing the email or password needs the
+     * current password. $in: name, phone, email, new_password, current_password.
+     */
+    public function updateOwner(int $ownerId, array $in): array
+    {
+        $name = trim((string) ($in['name'] ?? ''));
+        $phone = trim((string) ($in['phone'] ?? ''));
+        $email = strtolower(trim((string) ($in['email'] ?? '')));
+        $newPassword = (string) ($in['new_password'] ?? '');
+        $st = $this->db->prepare('SELECT email FROM users WHERE id = ?');
+        $st->execute([$ownerId]);
+        $oldEmail = strtolower((string) $st->fetchColumn());
+
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return ['ok' => false, 'error' => 'Enter a valid email address.'];
+        }
+        $sensitive = $email !== $oldEmail || $newPassword !== '';
+        if ($sensitive && !$this->verifyPassword($ownerId, (string) ($in['current_password'] ?? ''))) {
+            return ['ok' => false, 'error' => 'Your current password is wrong. It is needed to change the email or password.'];
+        }
+        if ($newPassword !== '' && strlen($newPassword) < 8) {
+            return ['ok' => false, 'error' => 'The new password must be at least 8 characters.'];
+        }
+        if ($email !== $oldEmail) {
+            $dup = $this->db->prepare('SELECT 1 FROM users WHERE email = ? AND id <> ? LIMIT 1');
+            $dup->execute([$email, $ownerId]);
+            if ($dup->fetchColumn()) {
+                return ['ok' => false, 'error' => 'That email is already used by another account.'];
+            }
+        }
+
+        $this->db->prepare('UPDATE users SET email = ? WHERE id = ?')->execute([$email, $ownerId]);
+        if ($newPassword !== '') {
+            $this->db->prepare('UPDATE users SET password_hash = ?, must_reset_password = 0 WHERE id = ?')
+                ->execute([password_hash($newPassword, PASSWORD_DEFAULT), $ownerId]);
+        }
+        if ($name !== '' || $phone !== '') {
+            [$first, $last] = array_pad(explode(' ', $name, 2), 2, '');
+            $has = $this->db->prepare('SELECT 1 FROM user_profiles WHERE user_id = ?');
+            $has->execute([$ownerId]);
+            if ($has->fetchColumn()) {
+                $this->db->prepare('UPDATE user_profiles SET first_name = ?, last_name = ?, phone = ? WHERE user_id = ?')
+                    ->execute([$first ?: null, $last ?: null, $phone ?: null, $ownerId]);
+            } else {
+                $this->db->prepare('INSERT INTO user_profiles (user_id, first_name, last_name, phone) VALUES (?,?,?,?)')
+                    ->execute([$ownerId, $first ?: null, $last ?: null, $phone ?: null]);
+            }
+        }
+        return ['ok' => true, 'error' => null, 'email_changed' => $email !== $oldEmail, 'old_email' => $oldEmail, 'email' => $email];
+    }
+
+    /**
+     * Hand the shop to someone else. If the email belongs to an account of
+     * this shop (e.g. a staff member) that account is promoted; otherwise a
+     * new owner account is created with the given password. The old owner is
+     * switched off ('disable') or kept as staff ('staff').
+     */
+    public function transferOwnership(int $tenantId, int $oldOwnerId, array $in): array
+    {
+        if (!$this->verifyPassword($oldOwnerId, (string) ($in['current_password'] ?? ''))) {
+            return ['ok' => false, 'error' => 'Your current password is wrong.'];
+        }
+        $email = strtolower(trim((string) ($in['email'] ?? '')));
+        $name = trim((string) ($in['name'] ?? ''));
+        $password = (string) ($in['password'] ?? '');
+        $oldBecomes = ($in['old_owner'] ?? 'disable') === 'staff' ? 'staff' : 'disable';
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return ['ok' => false, 'error' => 'Enter the new owner\'s email address.'];
+        }
+
+        $roles = $this->db->query("SELECT role_name, id FROM roles WHERE role_name IN ('tenant_owner','staff')")->fetchAll(PDO::FETCH_KEY_PAIR);
+        $ownerRole = (int) ($roles['tenant_owner'] ?? 0);
+        $staffRole = (int) ($roles['staff'] ?? 0);
+        if ($ownerRole <= 0 || ($oldBecomes === 'staff' && $staffRole <= 0)) {
+            return ['ok' => false, 'error' => 'The owner/staff roles are missing from the database.'];
+        }
+
+        $st = $this->db->prepare('SELECT id, tenant_id FROM users WHERE email = ? LIMIT 1');
+        $st->execute([$email]);
+        $existing = $st->fetch();
+        if ($existing && (int) $existing['id'] === $oldOwnerId) {
+            return ['ok' => false, 'error' => 'That is already the owner\'s email. To change your own email, use "My account" above.'];
+        }
+        if ($existing && (int) $existing['tenant_id'] !== $tenantId) {
+            return ['ok' => false, 'error' => 'That email belongs to an account outside this shop.'];
+        }
+        if (!$existing) {
+            if ($name === '') {
+                return ['ok' => false, 'error' => 'Enter the new owner\'s name.'];
+            }
+            if (strlen($password) < 8) {
+                return ['ok' => false, 'error' => 'Give the new owner a password of at least 8 characters.'];
+            }
+        }
+
+        try {
+            $this->db->beginTransaction();
+            if ($existing) {
+                $newId = (int) $existing['id'];
+                $this->db->prepare('UPDATE users SET role_id = ?, is_active = 1, email_verified = 1 WHERE id = ?')->execute([$ownerRole, $newId]);
+                if ($password !== '') {
+                    if (strlen($password) < 8) {
+                        throw new RuntimeException('Give the new owner a password of at least 8 characters, or leave it blank to keep theirs.');
+                    }
+                    $this->db->prepare('UPDATE users SET password_hash = ?, must_reset_password = 0 WHERE id = ?')
+                        ->execute([password_hash($password, PASSWORD_DEFAULT), $newId]);
+                }
+            } else {
+                $this->db->prepare(
+                    'INSERT INTO users (tenant_id, username, email, password_hash, role_id, is_active, email_verified, must_reset_password)
+                     VALUES (?,?,?,?,?,1,1,0)'
+                )->execute([$tenantId, $this->uniqueUsername($email), $email, password_hash($password, PASSWORD_DEFAULT), $ownerRole]);
+                $newId = (int) $this->db->lastInsertId();
+                [$first, $last] = array_pad(explode(' ', $name, 2), 2, '');
+                $this->db->prepare('INSERT INTO user_profiles (user_id, first_name, last_name, phone) VALUES (?,?,?,?)')
+                    ->execute([$newId, $first, $last ?: null, trim((string) ($in['phone'] ?? '')) ?: null]);
+            }
+            $this->db->prepare('UPDATE tenants SET owner_user_id = ? WHERE id = ?')->execute([$newId, $tenantId]);
+            if ($oldBecomes === 'staff') {
+                $this->db->prepare('UPDATE users SET role_id = ? WHERE id = ?')->execute([$staffRole, $oldOwnerId]);
+            } else {
+                $this->db->prepare('UPDATE users SET is_active = 0 WHERE id = ?')->execute([$oldOwnerId]);
+            }
+            $this->db->commit();
+            return ['ok' => true, 'error' => null, 'new_owner_id' => $newId, 'promoted' => (bool) $existing];
+        } catch (Throwable $e) {
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            error_log('SetupService::transferOwnership: ' . $e->getMessage());
+            return ['ok' => false, 'error' => $e instanceof RuntimeException ? $e->getMessage() : 'Could not change the owner. Nothing was changed.'];
+        }
     }
 
     private function uniqueUsername(string $email): string

@@ -86,7 +86,7 @@ ob_start();
           <div class="alert alert-info small">
             Back up the database before major hosting changes. Do not close this page while updates are running.
           </div>
-          <form method="post" onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').innerText='Running updates…';">
+          <form method="post" data-online-only onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').innerText='Running updates…';">
             <input type="hidden" name="action" value="run_updates">
             <input type="hidden" name="csrf" value="<?php echo htmlspecialchars($csrf); ?>">
             <button class="btn btn-primary"><i class="fas fa-database me-2"></i>Run pending updates</button>

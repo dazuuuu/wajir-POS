@@ -19,7 +19,7 @@ $moduleOn = static fn(string $module): bool => Modules::enabled($module, $__tena
 $posOpen = $menuGroupOpen(['/shop', '/orders', '/sales', '/invoices', '/returns', '/customers', '/reports', '/data', '/documents', '/services']);
 $inventoryOpen = $menuGroupOpen(['/inventory', '/store', '/purchases', '/suppliers', '/stationery', '/stock', '/publishers', '/categories']);
 $financeOpen = $menuGroupOpen(['/finances', '/expenses', '/salary', '/payroll', '/commissions', '/taxes']);
-$settingsOpen = $menuGroupOpen(['/admins', '/staff', '/settings', '/updates', '/clean_migrations']);
+$settingsOpen = $menuGroupOpen(['/admins', '/staff', '/settings', '/updates', '/setup', '/backup', '/clean_migrations']);
 $menuUpcoming = [];
 if ($moduleOn('services')) {
     try {
@@ -50,6 +50,7 @@ if ($moduleOn('services')) {
     <?php if ($menuOwner || TenantContext::can(Capabilities::SALES_VIEW)): ?>
       <a class="t-sublink <?php echo $menuOn('/sales'); ?>" href="<?php echo $menuRoute('super/sales/', 'staff/sales/'); ?>">Sales</a>
     <?php endif; ?>
+    <a class="t-sublink <?php echo $menuOn('/offline/history'); ?>" href="<?php echo public_url('offline/history.php'); ?>">Sales history (works offline)</a>
     <?php if ($menuOwner): ?>
       <?php if ($moduleOn('credit_sales')): ?><a class="t-sublink <?php echo $menuOn('/invoices'); ?>" href="<?php echo public_url('super/invoices/'); ?>">Invoices</a><?php endif; ?>
     <?php endif; ?>
@@ -61,7 +62,9 @@ if ($moduleOn('services')) {
       <a class="t-sublink <?php echo $menuOn('/customers'); ?>" href="<?php echo public_url('super/customers/'); ?>">Customers / Loyalty</a>
     <?php endif; ?>
     <?php if ($moduleOn('reports') && ($menuOwner || TenantContext::can(Capabilities::REPORTS_VIEW))): ?>
-      <a class="t-sublink <?php echo $menuOn('/reports'); ?>" href="<?php echo public_url('super/reports/'); ?>">Reports</a>
+      <a class="t-sublink <?php echo $menuOn('/reports/') && !$menuOn('/reports/inventory') ? 'active' : ''; ?>" href="<?php echo public_url('super/reports/'); ?>">Reports</a>
+      <a class="t-sublink <?php echo $menuOn('/reports/inventory'); ?>" href="<?php echo public_url('super/reports/inventory.php'); ?>">Inventory &amp; finance report</a>
+      <a class="t-sublink <?php echo $menuOn('/tracker/'); ?>" href="<?php echo public_url('super/tracker/'); ?>">Product Tracker</a>
       <a class="t-sublink <?php echo $menuOn('/data'); ?>" href="<?php echo public_url('super/data/'); ?>">Data export</a>
     <?php endif; ?>
     <?php if ($moduleOn('documents')): ?><a class="t-sublink <?php echo $menuOn('/documents'); ?>" href="<?php echo $menuRoute('super/documents/', 'staff/documents/'); ?>">Documents</a><?php endif; ?>
@@ -135,6 +138,8 @@ if ($moduleOn('services')) {
     <a class="t-sublink <?php echo $menuOn('/settings'); ?>" href="<?php echo public_url('super/settings/'); ?>">Settings toggles</a>
     <?php if ((int) ($__tenant['owner_user_id'] ?? 0) === (int) TenantContext::userId()): ?>
       <a class="t-sublink <?php echo $menuOn('/updates'); ?>" href="<?php echo public_url('super/updates/'); ?>">System updates</a>
+      <a class="t-sublink <?php echo $menuOn('/setup'); ?>" href="<?php echo public_url('setup/'); ?>">Owner account</a>
+      <?php if (Desktop::enabled()): ?><a class="t-sublink <?php echo $menuOn('/backup'); ?>" href="<?php echo public_url('super/backup/'); ?>">Backups</a><?php endif; ?>
     <?php endif; ?>
     <?php if ((int) ($__tenant['owner_user_id'] ?? 0) === (int) TenantContext::userId() && !Modules::supportLocked()): ?>
       <a class="t-sublink <?php echo $menuOn('/support'); ?>" href="<?php echo public_url('support/'); ?>">Developer support</a>
@@ -144,5 +149,10 @@ if ($moduleOn('services')) {
 <?php else: ?>
 <a class="t-link <?php echo $menuOn('/change-pin'); ?>" href="<?php echo public_url('staff/change-pin.php'); ?>">
   <i class="fas fa-key"></i><span>Change PIN</span>
+</a>
+<?php endif; ?>
+<?php if ($menuOwner && !Desktop::enabled()): ?>
+<a class="t-link <?php echo $menuOn('/download'); ?>" href="<?php echo public_url('download/'); ?>">
+  <i class="fab fa-windows"></i><span>Offline Windows app</span>
 </a>
 <?php endif; ?>

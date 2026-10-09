@@ -8,7 +8,7 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-if (!isset($_SESSION['user_id']) || $_SESSION['role_id'] > 2) {
+if (!isset($_SESSION['user_id']) || (int) ($_SESSION['role_id'] ?? 99) > 2) {
     echo json_encode(['success' => false, 'message' => 'Unauthorized']);
     exit();
 }

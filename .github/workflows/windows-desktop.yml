@@ -1,0 +1,62 @@
+# Builds the shop-computer (offline) version and tests it on a real Windows
+# machine. Runs when you push to GitHub (or by hand: Actions tab -> "Windows
+# offline POS" -> Run workflow). The tested zip is attached to the run as
+# "ShopPOS-Windows" — download it from there and upload it to your website.
+name: Windows offline POS
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'app/**'
+      - 'public/**'
+      - 'desktop/**'
+      - '.github/workflows/windows-desktop.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build ShopPOS-Windows.zip
+        run: bash desktop/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ShopPOS-Windows
+          path: dist/ShopPOS-Windows.zip
+          retention-days: 30
+
+  test-on-windows:
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ShopPOS-Windows
+      - name: Unzip (like the shop owner does)
+        shell: pwsh
+        run: Expand-Archive ShopPOS-Windows.zip -DestinationPath C:\ShopPOS
+      - name: Start POS.bat (the real launcher)
+        shell: cmd
+        env:
+          POS_NO_BROWSER: '1'
+        run: |
+          cd /d C:\ShopPOS\ShopPOS
+          call "Start POS.bat"
+      - name: Set up, log in, sell, back up, open every screen
+        shell: bash
+        run: |
+          cd /c/ShopPOS/ShopPOS
+          bash "$GITHUB_WORKSPACE/desktop/test-windows.sh"
+      - name: Stop POS.bat
+        if: always()
+        shell: cmd
+        run: |
+          cd /d C:\ShopPOS\ShopPOS
+          call "Stop POS.bat"
+          powershell -NoProfile -Command "try { (New-Object Net.Sockets.TcpClient).Connect('127.0.0.1', 8080); Write-Error 'still running'; exit 1 } catch { Write-Output 'stopped' }"
+      - name: Error log (if any)
+        if: always()
+        shell: bash
+        run: cat /c/ShopPOS/ShopPOS/data/logs/php-errors.log 2>/dev/null || echo "no errors logged"

@@ -21,7 +21,7 @@ $isOn = function (string $needle) use ($uri): string {
 <aside class="t-sidebar" id="tSidebar">
     <div class="t-brand">
         <button class="t-close" id="tSidebarClose" aria-label="Close"><i class="fas fa-times"></i></button>
-        <img class="t-logo" src="<?php echo htmlspecialchars($logo); ?>" alt="<?php echo htmlspecialchars($shopName); ?>">
+        <?php if ($logo): ?><img class="t-logo" src="<?php echo htmlspecialchars($logo); ?>" alt="<?php echo htmlspecialchars($shopName); ?>"><?php endif; ?>
         <div class="t-shop"><?php echo htmlspecialchars($shopName); ?></div>
         <div class="t-user">
             <?php echo htmlspecialchars($username); ?>

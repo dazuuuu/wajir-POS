@@ -12,7 +12,7 @@ function build_order_invoice_email(array $order, array $items, array $shop): arr
     $h = fn($v) => htmlspecialchars((string) $v, ENT_QUOTES);
     $shopName = $shop['name'] ?? 'the shop';
     $money = fn($n) => 'KES ' . number_format((float) $n, 2);
-    $logo = class_exists('Branding') ? Branding::loginLogo() : trim((string) ($shop['logo'] ?? ''));
+    $logo = class_exists('Branding') ? Branding::receiptLogo() : trim((string) ($shop['logo'] ?? ''));
     if ($logo !== '' && !preg_match('#^https?://#i', $logo)) {
         $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
         $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
@@ -77,10 +77,11 @@ function build_order_invoice_email(array $order, array $items, array $shop): arr
     $subject = 'Invoice ' . $order['receipt_number'] . ' from ' . $shopName;
     $invoiceDate = date('j M Y, g:i a', strtotime($order['created_at']));
 
+    $watermarkCss = $logo !== '' ? "background-image:url('" . $h($logo) . "');background-position:center 52%;background-repeat:no-repeat;background-size:82% auto;" : '';
     $html = <<<HTML
 <div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#f1f5f9;padding:28px 0">
   <div style="max-width:380px;margin:0 auto;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0;position:relative;">
-    <div style="background-image:url('{$h($logo)}');background-position:center 52%;background-repeat:no-repeat;background-size:82% auto;">
+    <div style="{$watermarkCss}">
     <div style="background:rgba(255,255,255,.82);padding:24px;color:#000;font-weight:900;">
     <div style="text-align:center;border-bottom:2px dashed #000;padding-bottom:10px;margin-bottom:10px;">
       {$logoHtml}

@@ -139,7 +139,7 @@ ob_start();
 
 <div class="row g-4">
   <div class="col-lg-4">
-    <form method="post" class="card border-0 shadow-sm" style="border-radius:14px;">
+    <form method="post" class="card border-0 shadow-sm" style="border-radius:14px;" data-offline>
       <input type="hidden" name="action" value="add_expense">
       <div class="card-body p-4">
         <h2 class="h6 fw-bold mb-3">Record expense</h2>
@@ -201,7 +201,7 @@ ob_start();
                 </td>
                 <td class="text-end fw-bold text-danger">KES <?php echo number_format((float) $e['amount'], 0); ?></td>
                 <td class="text-end">
-                  <form method="post" class="d-inline" onsubmit="return confirm('Delete this expense entry?');">
+                  <form method="post" class="d-inline" data-offline onsubmit="return confirm('Delete this expense entry?');">
                     <input type="hidden" name="action" value="delete_entry">
                     <input type="hidden" name="id" value="<?php echo (int) $e['id']; ?>">
                     <button class="btn btn-sm btn-outline-danger">Delete</button>
