@@ -27,7 +27,7 @@
        response that came via a redirect can't be used to answer a
        navigation. So: fetch(req) bare, pass server redirects through
        untouched, and never cache a redirected response. */
-const CACHE = 'shop-pos-v24';
+const CACHE = 'shop-pos-v27';
 const BASE  = new URL('.', self.location).pathname.replace(/\/$/, '');
 const OFFLINE_HOME_KEY = BASE + '/__offline_home__';
 // Which database the saved pages came from (sent by the page on warm-up).
@@ -56,6 +56,7 @@ const SHELL = [
   BASE + '/assets/js/offline-data.js',
   BASE + '/assets/js/offline-auth.js',
   BASE + '/auth/login.php',
+  BASE + '/auth/staff-login.php',
   BASE + '/assets/js/excel-tables.js',
   'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js',
   BASE + '/assets/js/pos-pack-cart.js',
@@ -205,7 +206,8 @@ function offlineHomeUrl() {
     served from cache: it can log in offline, see offline-auth.js.) */
 function isEntryPage(pathname) {
   return pathname === BASE + '/' || pathname === BASE + '/index.php'
-    || pathname === BASE + '/admin/' || pathname === BASE + '/admin/index.php';
+    || pathname === BASE + '/admin/' || pathname === BASE + '/admin/index.php'
+    || pathname === BASE + '/auth/staff-login.php';
 }
 
 /** A tiny page that sends the browser to `target` (served from cache there, at its real URL). */
@@ -342,7 +344,22 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Static files: cache first (ignore ?v= style version strings).
+  // The app's own CSS/JS: network first so style and script updates show up
+  // straight away; the saved copy is used only when offline.
+  if (/\.(css|js)$/i.test(url.pathname)) {
+    event.respondWith(
+      fetch(req, { cache: 'no-cache' }).then((res) => {
+        if (cacheable(res)) {
+          const copy = res.clone();
+          caches.open(CACHE).then((cache) => cache.put(req, copy));
+        }
+        return res;
+      }).catch(() => caches.match(req, { ignoreSearch: true }).then((hit) => hit || Response.error()))
+    );
+    return;
+  }
+
+  // Other static files (images, fonts): cache first (ignore ?v= strings).
   if (/\.(png|jpe?g|svg|gif|webp|ico|css|js|woff2?|ttf)$/i.test(url.pathname)) {
     event.respondWith(
       caches.match(req, { ignoreSearch: true }).then((hit) => hit || fetch(req).then((res) => {

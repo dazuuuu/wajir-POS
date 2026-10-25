@@ -302,7 +302,6 @@ class ProductTrackerModel extends Model
     private function line(array $r, string $source): array
     {
         $qty = max(0, (float) $r['quantity'] - (float) $r['returned']);
-        $ratio = (float) $r['quantity'] > 0 ? $qty / (float) $r['quantity'] : 0;
         $per = max(1, (float) ($r['units_per_pack'] ?? 1));
         $isPack = in_array($r['price_type'], ['wholesale', 'retail_pack'], true) && $per > 1 && trim((string) $r['pack_unit']) !== '';
         if ($isPack && $r['package_buying_price'] !== null && (float) $r['package_buying_price'] > 0) {
@@ -314,7 +313,10 @@ class ProductTrackerModel extends Model
             if ($unitCost <= 0 && (float) ($r['package_buying_price'] ?? 0) > 0) { $unitCost = (float) $r['package_buying_price'] / $per; }
             $cost = $qty * $unitCost;
         }
-        $revenue = (float) $r['line_total'] * $ratio;
+        // A return already took its refund off line_total (ReturnModel::
+        // applyFinancialReturn), so line_total is what was really earned —
+        // scaling it by the kept share again counted the return twice.
+        $revenue = (float) $r['line_total'];
         return [
             'id' => (int) $r['id'], 'source' => $source, 'doc_id' => (int) $r['doc_id'],
             'product_id' => $r['product_id'] !== null ? (int) $r['product_id'] : null,

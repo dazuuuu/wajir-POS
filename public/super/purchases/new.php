@@ -30,7 +30,7 @@ function purchase_handle_receipt(array $file): array
     if (!isset($allowed[$mime])) {
         return ['ok' => false, 'error' => 'Use a JPG, PNG, WEBP or GIF for the receipt.'];
     }
-    $dir = ROOT_PATH . '/public/assets/uploads/receipts';
+    $dir = PUBLIC_ROOT . '/assets/uploads/receipts';
     if (!is_dir($dir)) { @mkdir($dir, 0775, true); }
     $name = 'rcpt_' . bin2hex(random_bytes(6)) . '.' . $allowed[$mime];
     if (!move_uploaded_file($file['tmp_name'], $dir . '/' . $name)) {
@@ -70,7 +70,7 @@ function purchase_handle_product_image(array $file): array
     if (!isset($allowed[$mime])) {
         return ['ok' => false, 'error' => 'Use a JPG, PNG, WEBP or GIF image.'];
     }
-    $dir = ROOT_PATH . '/public/assets/uploads/products';
+    $dir = PUBLIC_ROOT . '/assets/uploads/products';
     if (!is_dir($dir)) { @mkdir($dir, 0775, true); }
     $name = 'prod_' . bin2hex(random_bytes(6)) . '.' . $allowed[$mime];
     if (!move_uploaded_file($file['tmp_name'], $dir . '/' . $name)) {

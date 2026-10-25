@@ -110,7 +110,60 @@
     if (btn) btn.style.display = 'inline-block';
   });
 
+  /**
+   * Shop-PC install: the POS server runs on this computer, so there's nothing
+   * to "install offline". The pill shows the copy on the website instead —
+   * and does the sending: every 3 minutes, and as soon as the internet is back.
+   */
+  function buildDesktopUi() {
+    var d = cfg.desktop;
+    var pill = document.createElement(d.backups ? 'a' : 'span');
+    pill.id = 'posOfflineUi';
+    if (d.backups) pill.href = d.backups;
+    pill.style.cssText = 'position:fixed;left:14px;bottom:14px;z-index:2000;border-radius:999px;padding:8px 14px;color:#fff;text-decoration:none;'
+      + 'box-shadow:0 4px 14px rgba(0,0,0,.2);font:600 .8rem/1.2 -apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:#6b7280;';
+    document.body.appendChild(pill);
+    var pos = document.createElement('style');
+    pos.textContent = '@media (min-width:993px){#posOfflineUi{left:280px!important}}'
+      + '@media (max-width:992px){#posOfflineUi{left:10px!important;bottom:calc(78px + env(safe-area-inset-bottom))!important;font-size:.72rem!important}}';
+    document.head.appendChild(pos);
+    var show = function (text, color, title) { pill.textContent = text; pill.style.background = color; pill.title = title || ''; };
+    if (!d.sync) {
+      show('Working on this computer ✓', '#7c3aed', 'Sync to the website is not set up: download the POS with "Back up my shop" on the website to turn it on.');
+      return;
+    }
+    var ago = function (iso) {
+      var t = iso ? Date.parse(iso) : NaN;
+      if (isNaN(t)) return 'not yet';
+      var m = (Date.now() - t) / 60000;
+      return m < 1.5 ? 'just now' : m < 90 ? Math.round(m) + ' min ago' : m < 2160 ? Math.round(m / 60) + 'h ago' : Math.round(m / 1440) + 'd ago';
+    };
+    var render = function (st) {
+      st = st || {};
+      if (st.error && st.offline) show('No internet · sales are saved here · last sync ' + ago(st.last_ok), '#b45309', 'Everything keeps working. It will be sent to the website when the internet is back.');
+      else if (st.error) show('Sync problem · tap for details', '#dc2626', st.error);
+      else if (st.last_ok) show('Online ✓ · synced to website ' + ago(st.last_ok), '#7c3aed', 'Everything done on this computer is copied to the website every few minutes.');
+      else show('Syncing to website…', '#7c3aed');
+    };
+    var busy = false;
+    var call = function (onlyStatus) {
+      if (busy) return;
+      busy = true;
+      fetch(d.url + (onlyStatus ? '?status=1' : ''), { credentials: 'same-origin', cache: 'no-store' })
+        .then(function (r) { return r.json(); })
+        .then(function (r) { render(r.status); })
+        .catch(function () {})
+        .then(function () { busy = false; });
+    };
+    call(true);
+    setTimeout(function () { call(false); }, 4000);
+    setInterval(function () { call(false); }, 180000);
+    setInterval(function () { call(true); }, 30000);
+    global.addEventListener('online', function () { call(false); });
+  }
+
   function buildUi() {
+    if (cfg.desktop) return buildDesktopUi();
     if (!cfg.warm || !cfg.warm.urls || !cfg.warm.urls.length) return; // logged out: nothing to install
     var wrap = document.createElement('div');
     wrap.id = 'posOfflineUi';

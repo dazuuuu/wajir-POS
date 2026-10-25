@@ -26,4 +26,4 @@ if ($res['ok']): ?>
     <div class="auth-foot"><a href="<?php echo public_url('auth/login.php'); ?>">Go to login</a></div>
 <?php endif;
 $content = ob_get_clean();
-include ROOT_PATH . '/public/templates/auth/layout.php';
+include PUBLIC_ROOT . '/templates/auth/layout.php';

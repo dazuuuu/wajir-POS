@@ -40,6 +40,11 @@ class TenantModel extends Model
     /** Ensure general-shop columns exist (safe on older installs). */
     public function ensureShopSchema(): void
     {
+        \SchemaHeal::once(\SchemaHeal::key(__FILE__, 'shop'), fn() => $this->healShopSchema());
+    }
+
+    private function healShopSchema(): void
+    {
         $checks = [
             'vat_rate' => "ALTER TABLE `tenants` ADD COLUMN `vat_rate` DECIMAL(5,2) NOT NULL DEFAULT 0.00 AFTER `kra_pin`",
             'vat_inclusive' => "ALTER TABLE `tenants` ADD COLUMN `vat_inclusive` TINYINT(1) NOT NULL DEFAULT 1 AFTER `vat_rate`",

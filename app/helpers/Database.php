@@ -116,6 +116,28 @@ class Database
                 // "SYSTEM" (whatever the host happens to be set to), which is
                 // exactly the mismatch that made offers look inactive.
                 self::$pdo->exec("SET time_zone = '+03:00'");
+                // One text collation for this connection, stated outright. Left
+                // to the server, MariaDB (e.g. Hostinger) can give the values the
+                // app sends one collation and the text written in the SQL another,
+                // so even `? = 'paid'` fails with "Illegal mix of collations
+                // (utf8mb4_general_ci,COERCIBLE) and (utf8mb4_unicode_ci,COERCIBLE)".
+                // Use the database's own collation (SchemaHeal keeps the tables on
+                // it), and on MariaDB 11.2+ make it the default for utf8mb4 too,
+                // so values sent by the app, text in the SQL and columns agree.
+                try {
+                    $coll = (string) self::$pdo->query('SELECT @@collation_database')->fetchColumn();
+                    if (!preg_match('/^utf8mb4_[a-z0-9_]+$/', $coll)) {
+                        $coll = 'utf8mb4_unicode_ci';
+                    }
+                    self::$pdo->exec('SET NAMES utf8mb4 COLLATE ' . $coll);
+                    try {
+                        self::$pdo->exec("SET SESSION character_set_collations = 'utf8mb4=" . $coll . "'");
+                    } catch (PDOException $ignored) {
+                        // MySQL and older MariaDB don't have it — and don't need it.
+                    }
+                } catch (PDOException $e) {
+                    error_log('Database: SET NAMES: ' . $e->getMessage());
+                }
                 // One text collation for every table (see SchemaHeal).
                 require_once __DIR__ . '/SchemaHeal.php';
                 SchemaHeal::collation(self::$pdo, (string) $cfg['dbname']);

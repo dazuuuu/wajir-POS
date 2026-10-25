@@ -46,11 +46,11 @@ $shopName = $__tenant['name'] ?? 'My Shop';
         .table thead th{ color:#8a8f9c; font-size:.72rem; letter-spacing:.04em; }
     </style>
     <?php echo $extra_css ?? ''; ?>
-    <link rel="stylesheet" href="<?php echo public_url('assets/css/track-theme.css'); ?>">
+    <link rel="stylesheet" href="<?php echo public_url('assets/css/track-theme.css') . '?v=' . @filemtime(__DIR__ . '/../../assets/css/track-theme.css'); ?>">
     <?php require __DIR__ . '/../../components/pwa_head.php'; ?>
 </head>
 <body class="trk">
-<script>try{if(localStorage.getItem('trkMini')==='1')document.body.classList.add('trk-mini');}catch(e){}</script>
+<script>try{if(localStorage.getItem('trkMini')==='1')document.body.classList.add('trk-mini');if(localStorage.getItem('trkSide')==='light')document.body.classList.add('trk-side-light');}catch(e){}</script>
 <div class="t-wrap">
     <?php include __DIR__ . '/../../components/tenants/sidebar.php'; ?>
     <main class="t-main">

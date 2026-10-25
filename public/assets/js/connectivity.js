@@ -15,7 +15,11 @@
      AppOnline.checkNow()               -> Promise<boolean>, force a check now
 */
 (function (global) {
-  var online = navigator.onLine !== false; // optimistic default
+  // Shop-PC install: the server is this computer (or, for phones, on the shop
+  // Wi-Fi) — reachable with no internet at all. So the browser's own
+  // "offline" flag (no network) means nothing there; only the ping counts.
+  var desktop = !!(global.POS_IS_DESKTOP || (global.POS_OFFLINE && global.POS_OFFLINE.isDesktop));
+  var online = desktop || navigator.onLine !== false; // optimistic default
   var listeners = [];
   var pingUrl = (function () {
     // Derive api/ping.php relative to wherever this script itself was
@@ -50,7 +54,7 @@
 
   function checkNow(timeoutMs) {
     timeoutMs = timeoutMs || 4000;
-    if (!navigator.onLine) {
+    if (!navigator.onLine && !desktop) {
       // The browser itself says there's no network — no point pinging.
       setOnline(false);
       return Promise.resolve(false);
@@ -101,15 +105,16 @@
       banner.id = 'appOfflineBanner';
       banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2100;background:#991b1b;color:#fff;' +
         'text-align:center;padding:8px 12px;font:600 .82rem/1.3 -apple-system,\'Segoe UI\',Roboto,Arial,sans-serif;';
-      banner.innerHTML = '<i class="fas fa-wifi" style="margin-right:6px;"></i>' +
-        'No internet connection — sales you record now are saved on this device and will sync automatically once you\'re back online.';
+      banner.innerHTML = '<i class="fas fa-wifi" style="margin-right:6px;"></i>' + (desktop
+        ? 'The POS isn\'t answering — on the shop computer, double-click Shop POS on the Desktop. Sales you record now are kept on this device until it\'s back.'
+        : 'No internet connection — sales you record now are saved on this device and will sync automatically once you\'re back online.');
       document.body.appendChild(banner);
     }
     banner.style.display = 'block';
   }
 
   window.addEventListener('online', function () { checkNow(); });
-  window.addEventListener('offline', function () { setOnline(false); });
+  window.addEventListener('offline', function () { if (desktop) checkNow(); else setOnline(false); });
   window.addEventListener('load', function () {
     checkNow();
     // Re-check periodically — catches the "wifi icon says connected but

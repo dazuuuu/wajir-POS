@@ -87,7 +87,7 @@ function save_tenant_logo(array $file, int $tenantId): array
     $allowed = ['image/png' => 'png', 'image/jpeg' => 'jpg', 'image/webp' => 'webp'];
     if (!$info || !isset($allowed[$info['mime']]))      return ['ok' => false, 'error' => 'Logo must be PNG, JPG or WEBP.'];
 
-    $dir = ROOT_PATH . '/public/uploads/branding';
+    $dir = PUBLIC_ROOT . '/uploads/branding';
     if (!is_dir($dir)) { @mkdir($dir, 0775, true); }
     $name = 'tenant_' . $tenantId . '_' . bin2hex(random_bytes(4)) . '.' . $allowed[$info['mime']];
     if (!move_uploaded_file($file['tmp_name'], $dir . '/' . $name)) {

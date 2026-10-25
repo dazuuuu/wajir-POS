@@ -47,7 +47,7 @@ echo "\n=== PageGuard::deny() (running source) ===\n";
 echo methodSource('PageGuard', 'deny');
 
 echo "\n=== Top of public/super/dashboard/index.php (deployed) ===\n";
-$dash = ROOT_PATH . '/public/super/dashboard/index.php';
+$dash = PUBLIC_ROOT . '/super/dashboard/index.php';
 if (is_file($dash)) {
     echo implode('', array_slice(file($dash), 0, 12));
 } else {

@@ -4,6 +4,7 @@
 // init.php / bootstrap.php autoloaders. Every page does:
 //     require_once __DIR__ . '/<relative>/app/app.php';
 
+require_once __DIR__ . '/helpers/ErrorLog.php';
 require_once __DIR__ . '/helpers/PathConfig.php';
 
 // The shop is in Kenya — fix this explicitly rather than trusting the host's
@@ -46,3 +47,10 @@ Modules::enforceRequest();
 Idempotency::guard();
 // Shop-PC install: one copy of the database per day (see Desktop.php).
 Desktop::dailyBackup();
+// Shop-PC install downloaded with the shop inside: load it before anything
+// else (public/setup/ does the import, then sends the owner to log in).
+if (Desktop::enabled() && PHP_SAPI !== 'cli' && is_file(Desktop::bundledFile())
+    && strpos((string) ($_SERVER['SCRIPT_NAME'] ?? ''), '/setup/') === false) {
+    header('Location: ' . public_url('setup/'));
+    exit;
+}

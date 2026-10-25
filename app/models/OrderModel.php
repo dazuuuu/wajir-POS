@@ -21,7 +21,7 @@ class OrderModel extends Model
     {
         parent::__construct($db);
         $this->ensurePaymentSchema();
-        ReturnModel::ensureTableExists($this->db);
+        \SchemaHeal::once(\SchemaHeal::key(__FILE__, 'returns'), fn() => ReturnModel::ensureTableExists($this->db));
     }
 
     /**
@@ -158,7 +158,6 @@ class OrderModel extends Model
             if ($channel === 'tab' && $customerId > 0 && (float) $priced['total'] > 0) {
                 $creditApplied = $customerModel->consumeStoreCredit($customerId, (float) $priced['total']);
                 if ($creditApplied > 0) {
-                    $this->ensurePaymentSchema();
                     $newDue = max(0, round((float) $priced['total'] - $creditApplied, 2));
                     $newStatus = $newDue <= 0.0001 ? 'paid' : 'open';
                     $newPaymentStatus = $newStatus === 'paid' ? 'paid' : 'part_paid';
@@ -1206,6 +1205,11 @@ class OrderModel extends Model
     }
 
     private function ensurePaymentSchema(): void
+    {
+        \SchemaHeal::once(\SchemaHeal::key(__FILE__, 'payments'), fn() => $this->healPaymentSchema());
+    }
+
+    private function healPaymentSchema(): void
     {
         // Dashboard and invoice queries always join this table. Migration 044
         // may be missing on an upgraded install, so create it before any query

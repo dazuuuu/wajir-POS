@@ -9,7 +9,7 @@ class ProductModel extends Model
     public function __construct(?\PDO $db = null)
     {
         parent::__construct($db);
-        $this->ensureSchema();
+        \SchemaHeal::once(\SchemaHeal::key(__FILE__), fn() => $this->ensureSchema());
     }
 
     public const UNITS = ['carton', 'bale', 'parcel', 'sack', 'bag', 'box', 'pack', 'piece', 'dozen', 'bundle', 'roll', 'set', 'pair', 'kg', 'g', 'ml', 'litre', 'tonne'];

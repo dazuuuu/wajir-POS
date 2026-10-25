@@ -5,8 +5,11 @@
 //   1. Database   — only while app/config/setup.lock doesn't exist: enter the
 //                   MySQL details (tested before saving).
 //   2. Tables     — install them if the database is empty.
-//   3. Owner      — create the owner account. Afterwards setup.lock is written
-//                   and steps 1–3 are never offered again.
+//   3. Email      — optional: the SMTP details, tested by sending a test email.
+//   4. Shop       — import a shop export (.zip from "Export my shop" on the old
+//                   server) — the owner is then emailed the login link — or
+//                   create a new owner account. Afterwards setup.lock is
+//                   written and steps 1–4 are never offered again.
 //   4. Afterwards — the logged-in owner can change their email, password and
 //                   details, or hand the shop to a new owner.
 require_once __DIR__ . '/../../app/app.php';
@@ -18,7 +21,11 @@ if (empty($_SESSION['setup_csrf'])) {
 $csrf = $_SESSION['setup_csrf'];
 $isPost = $_SERVER['REQUEST_METHOD'] === 'POST';
 $action = (string) ($_POST['action'] ?? '');
-if ($isPost && !hash_equals($csrf, (string) ($_POST['csrf'] ?? ''))) {
+if ($isPost && !$_POST && (int) ($_SERVER['CONTENT_LENGTH'] ?? 0) > 0) {
+    // PHP throws the whole form away when an upload is over post_max_size.
+    $isPost = false;
+    $error = 'That file is bigger than this server accepts (' . ini_get('post_max_size') . '). Ask the hosting company to raise "post_max_size" and "upload_max_filesize", or import on a server that allows bigger uploads.';
+} elseif ($isPost && !hash_equals($csrf, (string) ($_POST['csrf'] ?? ''))) {
     $isPost = false;
     $action = '';
     $error = 'This form expired. Please try again.';
@@ -44,12 +51,16 @@ $plain = static function (string $title, string $body) use ($h): void {
       .err{background:#fee2e2;color:#991b1b;padding:10px 12px;border-radius:9px;font-size:.88rem;margin-bottom:12px}
       .ok{background:#f5ecff;color:#32004b;padding:10px 12px;border-radius:9px;font-size:.88rem;margin-bottom:12px}
       .hint{color:#6b7280;font-size:.8rem;margin-top:4px}.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+      select{width:100%;padding:11px 12px;border:1px solid #d1d5db;border-radius:9px;font-size:.95rem;background:#fff}
+      .alt{background:#fff;color:var(--v);border:1px solid var(--v)}.link{background:none;color:#6b7280;font-weight:600;margin-top:8px;padding:6px}
+      .card{border:1px solid #eef0f4;border-radius:12px;padding:16px;margin-top:16px}.card h2{font-size:1.02rem;margin:0 0 4px}
+      dl{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:.9rem;margin:14px 0}dt{color:#6b7280}dd{margin:0;font-weight:600;word-break:break-all}
       a{color:var(--v)}code{background:#f3f4f6;padding:1px 5px;border-radius:4px}
       @media(max-width:560px){.box{margin:0;border-radius:0;min-height:100vh}.row{grid-template-columns:1fr}}
     </style></head><body><main class="box"><?php echo $body; ?></main></body></html><?php
     exit;
 };
-$steps = static fn(int $on): string => '<div class="steps">' . implode('', array_map(fn($i) => '<span class="' . ($i <= $on ? 'on' : '') . '"></span>', [1, 2, 3])) . '</div>';
+$steps = static fn(int $on): string => '<div class="steps">' . implode('', array_map(fn($i) => '<span class="' . ($i <= $on ? 'on' : '') . '"></span>', [1, 2, 3, 4])) . '</div>';
 
 // ---------- Step 1: database ----------
 $pdo = null;
@@ -106,6 +117,46 @@ if (!$pdo) {
 
 $setup = new SetupService($pdo);
 
+// ---------- Step 1b: existing data (only while setup.lock is missing) ----------
+// Deleting setup.lock on the server re-opens setup. If the database still has
+// a shop in it, offer to wipe it and install again from scratch, or keep it.
+if (!$locked && $setup->tablesExist() && empty($_SESSION['setup_keep_db'])) {
+    $dbName = '';
+    try { $dbName = (string) $pdo->query($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite' ? "SELECT 'local database'" : 'SELECT DATABASE()')->fetchColumn(); } catch (Throwable $e) {}
+    if ($isPost && $action === 'keep_db') {
+        $_SESSION['setup_keep_db'] = 1;
+        header('Location: ' . $self);
+        exit;
+    }
+    if ($isPost && $action === 'reset_db') {
+        if (strtoupper(trim((string) ($_POST['confirm_text'] ?? ''))) !== 'RESET') {
+            $error = 'Type RESET in the box to confirm.';
+        } else {
+            $r = $setup->resetDatabase();
+            if ($r['ok']) {
+                // Whoever was logged in belonged to the wiped database.
+                $csrfKeep = $_SESSION['setup_csrf'] ?? null;
+                $_SESSION = [];
+                if ($csrfKeep) { $_SESSION['setup_csrf'] = $csrfKeep; }
+                $_SESSION['setup_keep_db'] = 1; // the fresh install that follows is kept
+                error_log('Setup: database reset, ' . $r['dropped'] . ' tables dropped');
+                header('Location: ' . $self);
+                exit;
+            }
+            $error = 'The reset stopped part-way: ' . $r['error'] . ' — try again.';
+        }
+    }
+    $plain('Existing data', $steps(1) . '<h1>This database already has a shop</h1><p class="sub">Setup was re-opened (setup.lock was deleted). The database <strong>' . $h($dbName) . '</strong> still holds products, sales, staff and settings.</p>'
+        . ($error ? '<div class="err">' . $h($error) . '</div>' : '')
+        . '<form method="post" data-online-only><input type="hidden" name="action" value="keep_db"><input type="hidden" name="csrf" value="' . $h($csrf) . '">'
+        . '<button class="alt">Keep the data and continue</button></form>'
+        . '<div class="card" style="border-color:#fca5a5"><h2>Reset the database and install again</h2>'
+        . '<p class="hint" style="margin:0 0 8px">Deletes <strong>every table and all data</strong> in this database, then installs the POS tables fresh and runs every update. This cannot be undone — download "Export my shop" first if you might need the data.</p>'
+        . '<form method="post" data-online-only autocomplete="off"><input type="hidden" name="action" value="reset_db"><input type="hidden" name="csrf" value="' . $h($csrf) . '">'
+        . '<label>Type RESET to confirm</label><input name="confirm_text" autocomplete="off" required>'
+        . '<button style="background:#dc2626">Delete everything &amp; reinstall</button></form></div>');
+}
+
 // ---------- Step 2: tables ----------
 if (!$setup->tablesExist()) {
     if ($isPost && $action === 'install') {
@@ -119,6 +170,7 @@ if (!$setup->tablesExist()) {
             } catch (Throwable $e) {
                 error_log('Setup: updates after install: ' . $e->getMessage());
             }
+            $_SESSION['setup_keep_db'] = 1; // just installed — don't offer to wipe it
             header('Location: ' . $self);
             exit;
         }
@@ -129,11 +181,78 @@ if (!$setup->tablesExist()) {
         . '<form method="post" data-online-only><input type="hidden" name="action" value="install"><input type="hidden" name="csrf" value="' . $h($csrf) . '"><button>Install tables</button></form>');
 }
 
-// ---------- Step 3: owner ----------
+// ---------- Step 3: email (optional) ----------
 $owner = $setup->owner();
+if (!$owner && empty($_SESSION['setup_mail_done']) && !Desktop::enabled()) {
+    $old = @include APP_ROOT . '/config/mail.php';
+    $old = is_array($old) ? $old : [];
+    $m = [
+        'host' => (string) ($old['host'] ?? ''), 'port' => (int) ($old['port'] ?? 587),
+        'encryption' => (string) ($old['encryption'] ?? 'tls'), 'username' => (string) ($old['username'] ?? ''),
+        'from_email' => (string) ($old['from_email'] ?? ''), 'from_name' => (string) ($old['from_name'] ?? 'POS'),
+    ];
+    $testTo = '';
+    if ($isPost && $action === 'skip_mail') {
+        $_SESSION['setup_mail_done'] = true;
+        header('Location: ' . $self);
+        exit;
+    }
+    if ($isPost && $action === 'save_mail') {
+        $m = [
+            'host' => trim((string) ($_POST['host'] ?? '')), 'port' => (int) ($_POST['port'] ?? 587),
+            'encryption' => in_array($_POST['encryption'] ?? '', ['tls', 'ssl', 'none'], true) ? $_POST['encryption'] : 'tls',
+            'username' => trim((string) ($_POST['username'] ?? '')),
+            'from_email' => trim((string) ($_POST['from_email'] ?? '')), 'from_name' => trim((string) ($_POST['from_name'] ?? '')) ?: 'POS',
+        ];
+        $testTo = trim((string) ($_POST['test_to'] ?? ''));
+        // A blank password keeps the saved one (it is never shown back).
+        $cfg = $m + ['password' => (string) ($_POST['password'] ?? '') !== '' ? (string) $_POST['password'] : (string) ($old['password'] ?? ''),
+                     'skip_verify' => !empty($old['skip_verify'])];
+        if ($m['host'] === '' || !filter_var($m['from_email'], FILTER_VALIDATE_EMAIL) || !filter_var($testTo, FILTER_VALIDATE_EMAIL)) {
+            $error = 'Enter the SMTP server, a valid "send from" email, and an email to send the test to.';
+        } elseif (!(new MailService($cfg))->send($testTo, 'POS setup — test email', '<p>This is the test email from your POS setup. Email is working.</p>')) {
+            $error = 'The test email could not be sent: ' . (MailService::lastError() ?: 'unknown error') . ' Check the details, or skip this step.';
+        } elseif (!SetupService::writeMailConfig($cfg)) {
+            $error = 'The test email was sent, but app/config/mail.php could not be saved — check the folder permissions in cPanel.';
+        } else {
+            $_SESSION['setup_mail_done'] = true;
+            header('Location: ' . $self);
+            exit;
+        }
+    }
+    $opt = static fn(string $v, string $label) => '<option value="' . $v . '"' . ($m['encryption'] === $v ? ' selected' : '') . '>' . $label . '</option>';
+    $plain('Email', $steps(3) . '<h1>Email (optional)</h1><p class="sub">Used to send receipts, invoices and login codes — and to email the shop owner their login link when you import a shop. A test email is sent before anything is saved.</p>'
+        . ($error ? '<div class="err">' . $h($error) . '</div>' : '')
+        . '<form method="post" data-online-only autocomplete="off"><input type="hidden" name="action" value="save_mail"><input type="hidden" name="csrf" value="' . $h($csrf) . '">'
+        . '<label>SMTP server</label><input name="host" value="' . $h($m['host']) . '" placeholder="e.g. mail.yourdomain.com or smtp.gmail.com">'
+        . '<div class="row"><div><label>Port</label><input name="port" type="number" value="' . $h($m['port']) . '"></div>'
+        . '<div><label>Security</label><select name="encryption">' . $opt('tls', 'TLS (port 587)') . $opt('ssl', 'SSL (port 465)') . $opt('none', 'None') . '</select></div></div>'
+        . '<div class="row"><div><label>Username</label><input name="username" value="' . $h($m['username']) . '"></div>'
+        . '<div><label>Password</label><input name="password" type="password" autocomplete="new-password" placeholder="' . (!empty($old['password']) ? 'leave blank to keep' : '') . '"></div></div>'
+        . '<div class="row"><div><label>Send from (email)</label><input name="from_email" type="email" value="' . $h($m['from_email']) . '"></div>'
+        . '<div><label>Send from (name)</label><input name="from_name" value="' . $h($m['from_name']) . '"></div></div>'
+        . '<label>Send the test email to</label><input name="test_to" type="email" value="' . $h($testTo) . '" placeholder="you@example.com">'
+        . '<button>Send test &amp; save</button></form>'
+        . '<form method="post"><input type="hidden" name="action" value="skip_mail"><input type="hidden" name="csrf" value="' . $h($csrf) . '"><button class="link">Skip — set up email later</button></form>');
+}
+
+// ---------- Step 4: shop (import, or a new owner) ----------
 if (!$owner) {
     $f = ['shop_name' => '', 'name' => '', 'email' => '', 'phone' => ''];
     $site = (string) ($_POST['site'] ?? '');
+    // Shop-PC install downloaded with the shop inside ("Download with my
+    // shop"): load it straight away — same logins as the website.
+    if (Desktop::enabled() && is_file(Desktop::bundledFile())) {
+        $r = Desktop::importBundled();
+        if ($r['ok'] && $setup->owner()) {
+            SetupService::writeLock();
+            $_SESSION['setup_done'] = true;
+            $_SESSION['import_summary'] = $r;
+            header('Location: ' . public_url('auth/login.php') . '?setup=1');
+            exit;
+        }
+        $error = $r['ok'] ? 'The shop data came over but it has no owner account — create one below.' : $r['error'];
+    }
     // Shop-PC install: bring the existing shop over from the website once.
     if ($isPost && $action === 'import_site' && Desktop::enabled()) {
         $r = Desktop::importFromWebsite($site, trim((string) ($_POST['site_email'] ?? '')), (string) ($_POST['site_password'] ?? ''));
@@ -145,6 +264,44 @@ if (!$owner) {
             exit;
         }
         $error = $r['ok'] ? 'The data came over but it has no owner account — create one below.' : $r['error'];
+    }
+    // A shop export from another server ("Export my shop" → .zip).
+    if ($isPost && $action === 'import_file') {
+        $up = $_FILES['shop_file'] ?? null;
+        $upErr = (int) ($up['error'] ?? UPLOAD_ERR_NO_FILE);
+        if ($upErr === UPLOAD_ERR_INI_SIZE || $upErr === UPLOAD_ERR_FORM_SIZE) {
+            $error = 'That file is bigger than this server accepts (' . ini_get('upload_max_filesize') . '). Ask the hosting company to raise "upload_max_filesize" and "post_max_size".';
+        } elseif ($upErr !== UPLOAD_ERR_OK || !is_uploaded_file((string) $up['tmp_name'])) {
+            $error = 'Choose the shop export file (.zip) to import.';
+        } else {
+            $r = preg_match('/\.json$/i', (string) $up['name'])
+                ? ShopImport::fromJson((string) $up['tmp_name'])
+                : ShopImport::fromZip((string) $up['tmp_name']);
+            $owner = $r['ok'] ? $setup->owner() : null;
+            if ($owner) {
+                SetupService::writeLock();
+                // Bring the imported tables up to this version's shape.
+                try {
+                    (new Models\TenantModel($pdo))->ensureShopSchema();
+                    $mr = (new MigrationService($pdo))->runPending(0);
+                    if (!$mr['ok']) { error_log('Setup: updates after import: ' . ($mr['error'] ?? '')); }
+                } catch (Throwable $e) {
+                    error_log('Setup: updates after import: ' . $e->getMessage());
+                }
+                $mailError = SetupService::sendWelcome($owner);
+                $loginUrl = SetupService::loginUrl();
+                unset($_SESSION['setup_mail_done']);
+                $plain('Shop imported', $steps(4) . '<h1>' . $h($owner['shop_name'] ?? 'The shop') . ' is ready</h1>'
+                    . '<p class="sub">Everything came over: ' . number_format((int) $r['rows']) . ' records in ' . (int) $r['tables'] . ' tables, and ' . (int) $r['files'] . ' pictures/documents'
+                    . ((int) $r['files_missed'] ? ' (' . (int) $r['files_missed'] . ' could not be copied — upload those again from the products page)' : '') . '.</p>'
+                    . ($mailError === ''
+                        ? '<div class="ok">The owner was emailed the login link at <strong>' . $h($owner['email']) . '</strong>.</div>'
+                        : '<div class="err">The owner could not be emailed (' . $h($mailError) . '). Send them the login details below yourself.</div>')
+                    . '<dl><dt>Login page</dt><dd>' . $h($loginUrl) . '</dd><dt>Owner email</dt><dd>' . $h($owner['email']) . '</dd><dt>Password</dt><dd style="font-weight:400">the same as on the old server</dd></dl>'
+                    . '<a href="' . $h($loginUrl) . '"><button type="button">Go to login</button></a>');
+            }
+            $error = $r['ok'] ? 'The data came over but it has no owner account — create one below.' : $r['error'];
+        }
     }
     if ($isPost && $action === 'create_owner') {
         $f = array_merge($f, array_intersect_key(array_map('trim', array_map('strval', $_POST)), $f));
@@ -161,8 +318,15 @@ if (!$owner) {
             $error = $r['error'];
         }
     }
-    $plain('Owner account', $steps(3) . '<h1>Create the owner account</h1><p class="sub">This is the main admin of the shop. You\'ll log in with this email and password.</p>'
+    $plain('Shop', $steps(4) . '<h1>Bring in the shop</h1><p class="sub">Moving a shop from another server? Import its export file. Starting a new shop? Create the owner account below.</p>'
         . ($error ? '<div class="err">' . $h($error) . '</div>' : '')
+        . '<form method="post" enctype="multipart/form-data" data-online-only class="card" onsubmit="this.querySelector(\'button\').disabled=true;this.querySelector(\'button\').textContent=\'Importing… this can take a few minutes\';">'
+        . '<h2>Import a shop export</h2><p class="hint" style="margin:0 0 4px">The <code>.zip</code> from <em>Owner account → Export my shop</em> on the old server: products, stock, customers, sales history, staff and their logins, pictures. The owner is emailed the login link when it\'s done.</p>'
+        . '<input type="hidden" name="action" value="import_file"><input type="hidden" name="csrf" value="' . $h($csrf) . '">'
+        . '<label>Export file</label><input type="file" name="shop_file" accept=".zip,.json" required>'
+        . '<div class="hint">Largest file this server accepts: ' . $h(ini_get('upload_max_filesize')) . '.</div>'
+        . '<button>Import shop</button></form>'
+        . '<div class="card"><h2>Or create a new owner account</h2><p class="hint" style="margin:0">This is the main admin of the shop. You\'ll log in with this email and password.</p>'
         . '<form method="post" data-online-only autocomplete="off"><input type="hidden" name="action" value="create_owner"><input type="hidden" name="csrf" value="' . $h($csrf) . '">'
         . '<label>Shop name</label><input name="shop_name" value="' . $h($f['shop_name']) . '" placeholder="e.g. Duaqabe General Store" required>'
         . '<label>Owner\'s full name</label><input name="name" value="' . $h($f['name']) . '" required>'
@@ -171,7 +335,7 @@ if (!$owner) {
         . '<div class="row"><div><label>Password</label><input name="password" type="password" minlength="8" autocomplete="new-password" required></div>'
         . '<div><label>Repeat password</label><input name="password2" type="password" minlength="8" autocomplete="new-password" required></div></div>'
         . '<div class="hint">At least 8 characters.</div>'
-        . '<button>Create owner &amp; finish</button></form>'
+        . '<button class="alt">Create owner &amp; finish</button></form></div>'
         . (Desktop::enabled()
             ? '<hr style="margin:26px 0;border:0;border-top:1px solid #eef0f4"><h1 style="font-size:1.1rem">Or bring your shop over from the website</h1>'
               . '<p class="sub">Copies everything — products, stock, customers, sales history, staff and their logins, pictures — from your online POS. Needs the internet this one time; after that this computer works on its own. Log in afterwards with your usual owner email and password.</p>'
@@ -277,6 +441,16 @@ ob_start();
         <button class="btn btn-outline-danger w-100">Change owner</button>
       </div>
     </form>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm mt-4" style="border-radius:14px;">
+  <div class="card-body p-4 d-flex flex-wrap align-items-center justify-content-between gap-3">
+    <div>
+      <h2 class="h6 fw-bold mb-1">Export my shop</h2>
+      <p class="text-muted small mb-0">One file with everything — products, stock, customers, sales history, staff logins and pictures. Import it at <code>/setup/</code> on a new server to move the shop there. Keep it private: it contains your staff's logins.</p>
+    </div>
+    <a class="btn btn-outline-primary" href="<?php echo $h(public_url('api/backup/export.php') . '?zip=1'); ?>"><i class="fas fa-file-export me-1"></i>Download export</a>
   </div>
 </div>
 

@@ -11,7 +11,7 @@ class CategoryModel extends Model
     public function __construct(?\PDO $db = null)
     {
         parent::__construct($db);
-        $this->ensureSchema();
+        \SchemaHeal::once(\SchemaHeal::key(__FILE__), fn() => $this->ensureSchema());
     }
 
     /** Self-heals a `categories` table created before Stationery existed —

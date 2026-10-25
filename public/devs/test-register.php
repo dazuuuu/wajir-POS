@@ -41,4 +41,4 @@ if (!$test) {
 }
 
 $content = ob_get_clean();
-include ROOT_PATH . '/public/templates/auth/layout.php';
+include PUBLIC_ROOT . '/templates/auth/layout.php';

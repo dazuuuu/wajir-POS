@@ -26,6 +26,12 @@
   var base = (window.POS_AUTH_BASE || (window.POS_OFFLINE && window.POS_OFFLINE.scope) || '/').replace(/\/?$/, '/');
   var LOGIN = base + 'auth/login.php';
   var LOGOUT = base + 'auth/logout.php';
+  // Shop-PC install: the server is on this computer and always answers, so
+  // login/logout are simply the server's — no device copy, no offline
+  // login. Clear anything an earlier install on this computer left behind
+  // (it could send every page back to the login screen).
+  var DESKTOP = !!(window.POS_IS_DESKTOP || (window.POS_OFFLINE && window.POS_OFFLINE.isDesktop));
+  if (DESKTOP) { try { localStorage.removeItem(KEY); sessionStorage.removeItem(PENDING); } catch (ignored) {} }
 
   function load() {
     try {
@@ -110,6 +116,7 @@
 
   /** Logout from anywhere. Online: the server logs out. Offline: lock the app now, tell the server later. */
   function logout() {
+    if (DESKTOP) { location.href = LOGOUT; return; }
     var s = load();
     s.session = null;
     s.loggedOut = true;
@@ -130,6 +137,7 @@
    * user = who the server says is logged in on this page (as rendered).
    */
   function guardPage(user) {
+    if (DESKTOP) return false;
     var s = load();
     var offline = isOffline();
     if (s.loggedOut) {
@@ -166,7 +174,7 @@
 
   /** Login page wiring. */
   function wireLoginForm(form) {
-    if (!form) return;
+    if (!form || DESKTOP) return;
     var s = load();
     if (/[?&]logout=1/.test(location.search)) {
       s.session = null; s.loggedOut = true;

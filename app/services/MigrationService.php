@@ -107,6 +107,7 @@ class MigrationService
                 $st->execute([$name, hash_file('sha256', $file), $ran, $skipped, $userId]);
                 $completed[] = $name;
             }
+            \SchemaHeal::forget(); // new columns/tables: let the models re-check once
             return ['ok' => true, 'applied' => $completed, 'error' => null];
         } finally {
             try {

@@ -11,8 +11,10 @@ class CustomerModel extends Model
     public function __construct(?\PDO $db = null)
     {
         parent::__construct($db);
-        $this->ensureSchema();
-        $this->syncAllCreditBalancesOnce();
+        \SchemaHeal::once(\SchemaHeal::key(__FILE__), fn() => $this->ensureSchema());
+        // Each sale/payment refreshes its own customer's balance; this full
+        // rebuild is only a safety net, so hourly (per shop) is plenty.
+        \SchemaHeal::once(\SchemaHeal::key(__FILE__, 'balances:' . \TenantContext::tenantId()), fn() => $this->syncAllCreditBalancesOnce(), 3600);
     }
 
     public function create(array $in): array
@@ -354,7 +356,7 @@ class CustomerModel extends Model
         }
     }
 
-    /** One-time per request: recompute every customer's credit_balance from open invoices. */
+    /** Recompute every customer's credit_balance from open invoices (hourly safety net — see the constructor). */
     private function syncAllCreditBalancesOnce(): void
     {
         if (self::$balancesSynced) {
@@ -365,24 +367,47 @@ class CustomerModel extends Model
         if ($tid === null) {
             return;
         }
+        // Same rule as refreshCreditBalance() (an open invoice counts for a
+        // customer by id OR by name), worked out here in one pass. The old
+        // single UPDATE with a per-customer subquery took over a minute on a
+        // shop with a long history and locked every customer row meanwhile —
+        // freezing every till.
         try {
             $st = $this->db->prepare(
-                "UPDATE customers c
-                    SET c.credit_balance = (
-                        SELECT COALESCE(SUM(GREATEST(COALESCE(o.total,0) - COALESCE(o.amount_paid,0), 0)), 0)
-                          FROM orders o
-                         WHERE o.tenant_id = c.tenant_id
-                           AND o.status = 'open'
-                           AND o.invoice_deleted_at IS NULL
-                           AND GREATEST(COALESCE(o.total,0) - COALESCE(o.amount_paid,0), 0) > 0.0001
-                           AND (
-                                o.customer_id = c.id
-                             OR LOWER(TRIM(o.table_name)) = LOWER(TRIM(c.name))
-                           )
-                    )
-                  WHERE c.tenant_id = ?"
+                "SELECT customer_id, LOWER(TRIM(table_name)) AS lname,
+                        GREATEST(COALESCE(total,0) - COALESCE(amount_paid,0), 0) AS due
+                   FROM orders
+                  WHERE tenant_id = ? AND status = 'open' AND invoice_deleted_at IS NULL
+                    AND GREATEST(COALESCE(total,0) - COALESCE(amount_paid,0), 0) > 0.0001"
             );
             $st->execute([$tid]);
+            $open = $st->fetchAll(\PDO::FETCH_ASSOC);
+            $st = $this->db->prepare('SELECT id, LOWER(TRIM(name)) AS lname, credit_balance FROM customers WHERE tenant_id = ?');
+            $st->execute([$tid]);
+            $customers = $st->fetchAll(\PDO::FETCH_ASSOC);
+            $byName = [];
+            foreach ($customers as $c) {
+                if ($c['lname'] !== '') {
+                    $byName[$c['lname']][] = (int) $c['id'];
+                }
+            }
+            $balance = [];
+            foreach ($open as $o) {
+                $who = $byName[(string) $o['lname']] ?? [];
+                if ((int) $o['customer_id'] > 0) {
+                    $who[] = (int) $o['customer_id'];
+                }
+                foreach (array_unique($who) as $id) {
+                    $balance[$id] = ($balance[$id] ?? 0) + (float) $o['due'];
+                }
+            }
+            $upd = $this->db->prepare('UPDATE customers SET credit_balance = ? WHERE id = ? AND tenant_id = ?');
+            foreach ($customers as $c) {
+                $new = round($balance[(int) $c['id']] ?? 0, 2);
+                if (abs($new - (float) $c['credit_balance']) > 0.004) {
+                    $upd->execute([$new, (int) $c['id'], $tid]);
+                }
+            }
         } catch (\PDOException $ignored) {
         }
     }

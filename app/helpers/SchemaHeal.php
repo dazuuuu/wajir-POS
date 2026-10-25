@@ -16,9 +16,64 @@
 
 class SchemaHeal
 {
+    /** @var array<string,bool> keys already handled in this request */
+    private static array $done = [];
+
+    /**
+     * Run $fn (a model's "add any missing column" checks) once per code
+     * version instead of on every request. Those checks used to run on every
+     * till load and every sale: dozens of information_schema lookups plus
+     * ALTER TABLE ... MODIFY, which waits for an exclusive lock on the table —
+     * so one slow sale made every other till freeze behind it, with nothing in
+     * the logs. $key should include the model file's mtime (see key()), so
+     * uploading new code heals again. $ttl > 0 re-runs it after that many
+     * seconds (for recalculations rather than schema changes).
+     */
+    public static function once(string $key, callable $fn, int $ttl = 0): void
+    {
+        if (isset(self::$done[$key])) {
+            return;
+        }
+        self::$done[$key] = true;
+        $marker = self::dir() . '/' . substr(sha1($key), 0, 16);
+        $mtime = @filemtime($marker);
+        if ($mtime !== false && ($ttl <= 0 || $mtime > time() - $ttl)) {
+            return;
+        }
+        // Claimed before running: other requests arriving meanwhile skip it
+        // instead of piling up behind the same ALTERs, and one that dies
+        // half-way isn't retried on every request after.
+        @touch($marker);
+        $fn();
+    }
+
+    /** A once() key for a model file: changes whenever the file is updated. */
+    public static function key(string $file, string $what = ''): string
+    {
+        return $file . '|' . @filemtime($file) . '|' . $what;
+    }
+
+    /** Forget every once() run — after installing tables, importing or updating. */
+    public static function forget(): void
+    {
+        foreach (glob(self::dir() . '/*') ?: [] as $f) {
+            @unlink($f);
+        }
+        self::$done = [];
+    }
+
+    private static function dir(): string
+    {
+        $dir = rtrim(sys_get_temp_dir(), '/\\') . '/pos_heal_' . substr(sha1(ROOT_PATH), 0, 12);
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0775, true);
+        }
+        return $dir;
+    }
+
     public static function collation(PDO $pdo, string $dbName): void
     {
-        $marker = rtrim(sys_get_temp_dir(), '/') . '/pos_schema_heal_' . substr(sha1(ROOT_PATH . '|' . $dbName), 0, 12);
+        $marker = self::dir() . '/collation_' . substr(sha1($dbName), 0, 12); // cleared by forget() after an import
         if (is_file($marker) && filemtime($marker) > time() - 86400) {
             return;
         }
@@ -42,6 +97,16 @@ class SchemaHeal
             );
             $st->execute([$dbName, $target]);
             $tables = $st->fetchAll(PDO::FETCH_COLUMN);
+            // A table can carry the right default but single columns with
+            // another collation (imported dumps, older ALTERs) — fix those too.
+            $st = $pdo->prepare(
+                "SELECT DISTINCT c.table_name FROM information_schema.columns c
+                   JOIN information_schema.tables t ON t.table_schema = c.table_schema AND t.table_name = c.table_name
+                  WHERE c.table_schema = ? AND t.table_type = 'BASE TABLE'
+                    AND c.collation_name LIKE 'utf8mb4%' AND c.collation_name <> ?"
+            );
+            $st->execute([$dbName, $target]);
+            $tables = array_values(array_unique(array_merge($tables, $st->fetchAll(PDO::FETCH_COLUMN))));
             if (!$tables) {
                 return;
             }

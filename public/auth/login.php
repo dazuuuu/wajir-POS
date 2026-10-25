@@ -85,6 +85,14 @@ $verdict = AccountGuard::evaluate($user);
     }
 }
 
+// Signed in from the landing page's admin card and it failed? Show the
+// message back there (in the card) instead of on this page.
+if ($error && ($_POST['from'] ?? '') === 'landing') {
+    $_SESSION['landing_signin'] = ['card' => 'admin', 'error' => $error, 'email' => $email];
+    header('Location: ' . public_url('') . '#signin');
+    exit;
+}
+
 $page_title = 'Log in';
 ob_start();
 ?>
@@ -106,12 +114,24 @@ ob_start();
 <div class="auth-foot">
     <a href="<?php echo public_url('auth/forgot-password.php'); ?>">Forgot password?</a>
     <br>
-    <a href="<?php echo public_url(''); ?>">Staff? Go to the PIN screen</a>
+    <a href="<?php echo public_url('auth/staff-login.php'); ?>">Staff? Go to the PIN screen</a>
+    <br>
+    <a href="<?php echo public_url(''); ?>">← Back to the shop site</a>
 </div>
-<script>window.POS_AUTH_BASE = <?php echo json_encode(public_url()); ?>;</script>
+<script>window.POS_AUTH_BASE = <?php echo json_encode(public_url()); ?>; window.POS_IS_DESKTOP = <?php echo json_encode(Desktop::enabled()); ?>;</script>
+<?php if (Desktop::enabled()): ?>
+<script>
+// Shop PC: clear what an earlier install at this same address left in the
+// browser — its saved login state and saved copies of old scripts — which
+// could otherwise send every page straight back here.
+try { localStorage.removeItem('posOfflineAuth'); sessionStorage.removeItem('posPendingCred'); } catch (e) {}
+if ('serviceWorker' in navigator) navigator.serviceWorker.getRegistrations().then(function (r) { r.forEach(function (x) { x.unregister(); }); });
+if (window.caches) caches.keys().then(function (k) { k.forEach(function (n) { caches.delete(n); }); });
+</script>
+<?php endif; ?>
 <script src="<?php echo public_url('assets/js/connectivity.js'); ?>"></script>
 <script src="<?php echo public_url('assets/js/offline-auth.js'); ?>"></script>
-<script>PosAuth.wireLoginForm(document.getElementById('loginForm'));</script>
+<script>if (!window.POS_IS_DESKTOP) PosAuth.wireLoginForm(document.getElementById('loginForm'));</script>
 <?php
 $content = ob_get_clean();
-include ROOT_PATH . '/public/templates/auth/layout.php';
+include PUBLIC_ROOT . '/templates/auth/layout.php';

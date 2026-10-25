@@ -4,7 +4,7 @@
 
 function build_staff_invite_email(string $name, string $tempPassword, string $loginUrl, string $shopName = ''): array
 {
-    $logo = '/public/assets/images/logo/logo.png';
+    $logo = app_url('assets/images/logo/logo.png');
     $n    = htmlspecialchars($name, ENT_QUOTES);
     $pw   = htmlspecialchars($tempPassword, ENT_QUOTES);
     $shop = htmlspecialchars($shopName, ENT_QUOTES);

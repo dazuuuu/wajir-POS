@@ -1,0 +1,41 @@
+# .htaccess (project root) — upload the WHOLE project into public_html/:
+#
+#   public_html/
+#     .htaccess   ← this file
+#     index.php   ← router (fallback when mod_rewrite is off)
+#     app/        ← code, config, logs — never reachable from the web
+#     public/     ← the site, served at the domain root
+#
+# Visitors only ever see clean addresses: https://yourshop.com/auth/login.php
+# runs public/auth/login.php. An old link with /public/ in it is redirected
+# to the clean one.
+
+Options -Indexes -MultiViews
+DirectoryIndex index.php index.html
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Private: code, config (database & email passwords), logs, databases,
+    # exports and tools.
+    RewriteRule ^(app|HOST|desktop|dist|test|export|storage|vendor|_ignore_folder|\.git)(/|$) - [F,L]
+    RewriteRule (^|/)\.(?!well-known/) - [F,L]
+    RewriteRule \.(sql|sqlite|sqlite3|db|log|lock|md|bak|env|ini)$ - [F,L,NC]
+    # Files lying in the project root itself (exports, composer.json, …).
+    RewriteRule ^[^/]+\.(zip|json|sh)$ - [F,L,NC]
+
+    # Old /public/... links → the same page without /public (seen by the
+    # visitor). THE_REQUEST is the browser's own request, so the internal
+    # rewrite below never loops back here.
+    RewriteCond %{THE_REQUEST} \s/public(/[^\s?]*)?[\s?]
+    RewriteRule ^public/?(.*)$ /$1 [R=301,L,NE]
+
+    # Everything else is served from public/.
+    RewriteCond %{REQUEST_URI} !^/public(/|$)
+    RewriteRule ^(.*)$ public/$1 [L]
+</IfModule>
+
+# Without mod_rewrite: keep private folders closed; index.php routes pages.
+<IfModule !mod_rewrite.c>
+    RedirectMatch 403 ^/(app|HOST|desktop|dist|test|export|storage|vendor|_ignore_folder)(/|$)
+</IfModule>

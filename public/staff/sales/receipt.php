@@ -230,6 +230,7 @@ $backLinks = $isStaffViewer
 
   <div class="sheet"><?php echo receipt_inner($sale, $items, $shop, $staff, $RECEIPT_BUSINESS, $tenant); ?></div>
 
+  <?php if (empty($_GET['embed'])): // ?embed=1: shown inside another page's preview ?>
   <div class="actions">
     <div class="d-flex gap-2 mb-2">
       <button onclick="window.print()" class="btn btn-primary flex-fill"><i class="fas fa-print me-1"></i> Print / Save PDF</button>
@@ -251,5 +252,6 @@ $backLinks = $isStaffViewer
       <?php endforeach; ?>
     </div>
   </div>
+  <?php endif; ?>
 </body>
 </html>

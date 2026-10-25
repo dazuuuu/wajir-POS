@@ -219,6 +219,7 @@ if ($isDepositReceipt && $latestPayment) {
     <?php echo ReceiptFooter::html($tenant, $order['receipt_number'] ?? null); ?>
   </div>
 
+  <?php if (empty($_GET['embed'])): // ?embed=1: shown inside another page's preview, which has its own buttons ?>
   <div class="actions">
     <div class="d-flex gap-2 mb-2">
       <button onclick="window.print()" class="btn btn-primary flex-fill"><i class="fas fa-print me-1"></i> Print</button>
@@ -244,6 +245,7 @@ if ($isDepositReceipt && $latestPayment) {
     </div>
     <?php endif; ?>
   </div>
+  <?php endif; ?>
   <?php if ($autoPrint): ?>
   <script>
     window.addEventListener('load', function () {

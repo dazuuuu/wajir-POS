@@ -48,6 +48,7 @@ class MailService
             return false;
         }
         $mail = new PHPMailer(true);
+        $mail->CharSet = PHPMailer::CHARSET_UTF8; // names, dashes and KES amounts must not turn into junk
         try {
             $mail->isSMTP();
             $mail->Host = $this->cfg['host'] ?? 'localhost';

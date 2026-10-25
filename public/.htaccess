@@ -1,0 +1,48 @@
+# public/.htaccess — the web root of the POS.
+#
+# Pages are real files and folders (super/shop/ → super/shop/index.php), so
+# most "404 on every page" problems after hosting are the server not opening
+# index.php inside a folder, or a link written without ".php". Both are
+# handled here.
+
+Options -Indexes -MultiViews +FollowSymLinks
+DirectoryIndex index.php index.html
+# super/shop → super/shop/ (then index.php above)
+DirectorySlash On
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Hidden files (.htaccess, .git, .env …) are never served.
+    RewriteRule (^|/)\.(?!well-known/) - [F,L]
+
+    # Uploaded pictures/documents must never run as code.
+    RewriteRule ^(uploads|assets/uploads)/.*\.(php\d?|phtml|phar|pl|py|cgi|sh)$ - [F,L,NC]
+
+    # Real files and folders are served as they are.
+    RewriteCond %{REQUEST_FILENAME} -f [OR]
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [L]
+
+    # A link without .php: /auth/login → /auth/login.php
+    RewriteCond %{REQUEST_FILENAME}.php -f
+    RewriteRule ^(.+?)/?$ $1.php [L]
+</IfModule>
+
+# The offline app: the service worker and manifest must not be cached by the
+# browser/proxy, or updates (and fixes) never reach the tills.
+<FilesMatch "^(sw\.js|manifest\.webmanifest)$">
+    <IfModule mod_headers.c>
+        Header set Cache-Control "no-cache, no-store, must-revalidate"
+        Header set Service-Worker-Allowed "/"
+    </IfModule>
+</FilesMatch>
+<IfModule mod_mime.c>
+    AddType application/manifest+json .webmanifest
+    AddType application/javascript .js
+</IfModule>
+
+# Faster pages on slow connections.
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/html text/css application/javascript application/json image/svg+xml
+</IfModule>

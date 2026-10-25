@@ -12,7 +12,7 @@ class HeldOrderModel extends Model
     public function __construct(?\PDO $db = null)
     {
         parent::__construct($db);
-        $this->ensureSchema();
+        \SchemaHeal::once(\SchemaHeal::key(__FILE__), fn() => $this->ensureSchema());
     }
 
     /** @param array $in customer_name, staff_id, items[{product_id,quantity}] */

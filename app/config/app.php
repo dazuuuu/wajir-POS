@@ -4,7 +4,7 @@
 
 $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
 $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
-$basePath = defined('BASE_URL') && BASE_URL !== '' ? BASE_URL : '/public';
+$basePath = defined('BASE_URL') ? BASE_URL : '/public';
 
 return [
     'app_name'     => '2in1',

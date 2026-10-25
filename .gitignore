@@ -26,10 +26,15 @@ app/config/database.local.php
 /app/config/setup.lock
 /desktop/
 /HOST/
-
+/export/
 # Shop-computer (offline) bundle build output and download cache
 /dist/
 /desktop/.cache/
+/_ignore_folder/
 *.sqlite-wal
 *.sqlite-shm
 
+
+app/storage/logs/
+app/storage/backups/
+app/storage/restore/

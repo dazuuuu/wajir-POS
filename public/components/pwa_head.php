@@ -23,6 +23,14 @@ window.POS_OFFLINE = {
   salesApi: <?php echo json_encode(public_url('api/offline/sales.php')); ?>,
   historyUrl: <?php echo json_encode(public_url('offline/history.php')); ?>,
   warm: <?php echo json_encode($__pwaWarm, JSON_UNESCAPED_SLASHES); ?>,
+  isDesktop: <?php echo json_encode(class_exists('Desktop') && Desktop::enabled()); ?>,
+  // Shop-PC install: the server is this computer, so the browser's offline
+  // mode isn't needed; the pill shows the sync to the website instead.
+  desktop: <?php echo json_encode(class_exists('Desktop') && Desktop::enabled() && !empty($_SESSION['logged_in']) ? [
+      'sync' => class_exists('DesktopSync') && DesktopSync::configured(),
+      'url' => public_url('api/sync/push.php'),
+      'backups' => TenantContext::role() === 'tenant_owner' ? public_url('super/backup/') : null,
+  ] : null, JSON_UNESCAPED_SLASHES); ?>,
   user: <?php echo json_encode(empty($_SESSION['logged_in']) ? null : [
       'email' => (string) ($_SESSION['email'] ?? ''),
       'username' => (string) ($_SESSION['username'] ?? ''),
@@ -34,8 +42,14 @@ window.POS_OFFLINE = {
 <script src="<?php echo public_url('assets/js/offline-auth.js'); ?>"></script>
 <script>
 // Logged out on this device (or a different person logged in offline)? Leave now.
-if (window.PosAuth && window.POS_OFFLINE.user) PosAuth.guardPage(window.POS_OFFLINE.user);
-if ('serviceWorker' in navigator) {
+// (Not on the shop PC: its server is local, so the server's login is the only one.)
+if (window.PosAuth && window.POS_OFFLINE.user && !window.POS_OFFLINE.isDesktop) PosAuth.guardPage(window.POS_OFFLINE.user);
+if ('serviceWorker' in navigator && window.POS_OFFLINE.isDesktop) {
+  // Shop PC: the server is this computer — no saved copies of pages needed
+  // (they'd only go stale after an update). Remove any from earlier versions.
+  navigator.serviceWorker.getRegistrations().then(function (regs) { regs.forEach(function (r) { r.unregister(); }); });
+  if (window.caches) caches.keys().then(function (keys) { keys.forEach(function (k) { caches.delete(k); }); });
+} else if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {
     var warm = window.POS_OFFLINE.warm;
     function sendWarm(worker, force) {

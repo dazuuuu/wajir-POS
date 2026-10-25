@@ -47,7 +47,7 @@ function stock_handle_image(array $file): array
     if (!isset($allowed[$mime])) {
         return ['ok' => false, 'error' => 'Use a JPG, PNG, WEBP or GIF image.'];
     }
-    $dir = ROOT_PATH . '/public/assets/uploads/products';
+    $dir = PUBLIC_ROOT . '/assets/uploads/products';
     if (!is_dir($dir)) { @mkdir($dir, 0775, true); }
     $name = 'prod_' . bin2hex(random_bytes(6)) . '.' . $allowed[$mime];
     if (!move_uploaded_file($file['tmp_name'], $dir . '/' . $name)) {

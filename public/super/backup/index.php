@@ -53,7 +53,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'backu
     exit;
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'sync_now') {
+    $r = DesktopSync::push();
+    if ($r['ok']) {
+        $_SESSION['flash']['success'] = !empty($r['busy']) ? 'A sync is already running — check again in a minute.'
+            : ($r['sent'] ? $r['sent'] . ' change(s) sent to the website.' : 'The website is up to date.');
+    } else {
+        $_SESSION['flash']['error'] = 'Sync didn\'t finish: ' . $r['error'] . ' It will try again automatically.';
+    }
+    header('Location: ' . $self);
+    exit;
+}
+
 $list = Desktop::backups();
+$sync = DesktopSync::configured() ? DesktopSync::status() : null;
+$ago = static function (?string $iso): string {
+    if (!$iso || ($t = strtotime($iso)) === false) {
+        return 'never';
+    }
+    $d = time() - $t;
+    return $d < 90 ? 'just now' : ($d < 5400 ? round($d / 60) . ' min ago' : ($d < 129600 ? round($d / 3600) . ' h ago' : date('j M Y H:i', $t)));
+};
 $size = static fn(int $b): string => $b > 1048576 ? round($b / 1048576, 1) . ' MB' : max(1, round($b / 1024)) . ' KB';
 
 $page_title = 'Backups';
@@ -68,6 +88,15 @@ ob_start();
       <form method="post" class="d-inline"><input type="hidden" name="action" value="backup_now">
         <button class="btn btn-primary"><i class="fas fa-floppy-disk me-1"></i>Back up now</button></form>
       <a class="btn btn-outline-secondary ms-1" href="<?php echo $self; ?>?download=now"><i class="fas fa-download me-1"></i>Download current data</a>
+      <?php if ($sync !== null): ?>
+      <hr>
+      <h3 class="h6 fw-bold"><i class="fas fa-cloud-arrow-up me-1"></i>Copy on the website</h3>
+      <p class="small text-muted mb-2">Whenever this computer has internet, everything done here (sales, invoices, stock, payments, credit sales…) is sent to the online POS by itself, every few minutes.</p>
+      <p class="small mb-2">Last sent: <strong><?php echo htmlspecialchars($ago($sync['last_ok'] ?? null)); ?></strong>
+        <?php if (!empty($sync['error'])): ?><br><span class="text-danger">Last try (<?php echo htmlspecialchars($ago($sync['last_try'] ?? null)); ?>) didn't finish: <?php echo htmlspecialchars($sync['error']); ?></span><?php endif; ?></p>
+      <form method="post" class="d-inline"><input type="hidden" name="action" value="sync_now">
+        <button class="btn btn-outline-primary btn-sm"><i class="fas fa-rotate me-1"></i>Sync now</button></form>
+      <?php endif; ?>
       <hr>
       <h3 class="h6 fw-bold">Restoring a backup</h3>
       <ol class="small text-muted mb-0">

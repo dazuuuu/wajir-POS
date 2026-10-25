@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Duaqabe General Shop — Coming Soon</title>
+<meta name="description" content="Duaqabe General Shop is upgrading its system for faster, smoother shopping. We'll be back very soon!">
+<!-- Social share (replace https://yourdomain.com with your real domain) -->
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://yourdomain.com/">
+<meta property="og:title" content="Duaqabe General Shop — Our new system is on its way">
+<meta property="og:description" content="We're upgrading our system for faster, smoother shopping. Back very soon!">
+<meta property="og:image" content="https://yourdomain.com/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Duaqabe General Shop — Our new system is on its way">
+<meta name="twitter:description" content="We're upgrading our system for faster, smoother shopping. Back very soon!">
+<meta name="twitter:image" content="https://yourdomain.com/og-image.png">
+<meta name="theme-color" content="#4b2563">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400&family=Nunito+Sans:wght@400;600&family=Space+Mono&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --plum:#4b2563; --plum-deep:#2f1640; --violet:#7b4fa3; --lilac:#e9def2;
+    --blush:#f6f1fa; --ink:#231a2b; --muted:#6b5e75; --gold:#c9a7e0; --white:#fff;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{font-family:"Nunito Sans",sans-serif;color:var(--ink);background:var(--white);line-height:1.7;overflow-x:hidden}
+  h1,h2,h3{font-family:"Cormorant Garamond",serif;font-weight:500;line-height:1.15}
+  .eyebrow{font-family:"Space Mono",monospace;font-size:.72rem;letter-spacing:.18em;text-transform:uppercase}
+  .btn{display:inline-flex;align-items:center;gap:.8rem;background:var(--plum);color:#fff;text-decoration:none;
+    font-family:"Space Mono",monospace;font-size:.75rem;letter-spacing:.2em;text-transform:uppercase;
+    padding:1.1rem 1.8rem;border:none;cursor:pointer;box-shadow:0 6px 18px rgba(75,37,99,.25);transition:.3s}
+  .btn:hover{background:var(--violet);transform:translateY(-2px)}
+  .btn .arr{transition:.3s}.btn:hover .arr{transform:translateX(4px)}
+  .wrap{max-width:1100px;margin:0 auto;padding:0 16px}
+  .reveal{opacity:0;transform:translateY(30px);transition:1s cubic-bezier(.2,.7,.2,1)}
+  .reveal.in{opacity:1;transform:none}
+
+  /* HERO */
+  .hero{display:grid;grid-template-columns:58% 42%;min-height:560px;position:relative}
+  .hero-left{background:var(--lilac);display:flex;align-items:center;justify-content:flex-end;padding:60px 0}
+  .hero-right{position:relative;overflow:hidden;
+    background:radial-gradient(circle at 70% 30%,#9d6fc4 0,#5b2d7a 45%,#2f1640 100%)}
+  .hero-right::before{content:"";position:absolute;inset:0;
+    background:repeating-linear-gradient(45deg,rgba(255,255,255,.03) 0 2px,transparent 2px 14px)}
+  .orb{position:absolute;border-radius:50%;filter:blur(2px);opacity:.55;animation:float 9s ease-in-out infinite}
+  .orb.a{width:220px;height:220px;background:radial-gradient(circle,#e3c8f5,transparent 70%);top:8%;right:-40px}
+  .orb.b{width:140px;height:140px;background:radial-gradient(circle,#c9a7e0,transparent 70%);bottom:10%;right:30%;animation-delay:-4s}
+  @keyframes float{50%{transform:translateY(-25px) scale(1.05)}}
+  .card{background:#fff;padding:56px 48px;max-width:500px;margin-right:-60px;position:relative;z-index:2;box-shadow:0 20px 60px rgba(47,22,64,.08)}
+  .card h1{font-size:clamp(2.1rem,4vw,2.9rem);margin:.8rem 0 1.2rem;color:var(--plum-deep)}
+  .card h1 em{color:var(--violet)}
+  .card p{font-size:.95rem;color:var(--muted);margin-bottom:1rem}
+  .status{display:inline-flex;align-items:center;gap:.6rem;margin-bottom:.3rem}
+  .dot{width:9px;height:9px;border-radius:50%;background:#9b5de5;box-shadow:0 0 0 0 rgba(155,93,229,.7);animation:pulse 1.8s infinite}
+  @keyframes pulse{70%{box-shadow:0 0 0 12px rgba(155,93,229,0)}100%{box-shadow:0 0 0 0 rgba(155,93,229,0)}}
+
+  /* device mockup */
+  .device{position:absolute;left:12%;top:50%;transform:translateY(-50%) rotate(-4deg);z-index:3;animation:bob 6s ease-in-out infinite}
+  @keyframes bob{50%{transform:translateY(calc(-50% - 12px)) rotate(-3deg)}}
+  .tablet{width:200px;height:270px;background:#111;border-radius:18px;padding:10px;box-shadow:0 30px 60px rgba(0,0,0,.45)}
+  .screen{height:100%;border-radius:10px;background:linear-gradient(160deg,#3a1a50,#7b4fa3);padding:18px 14px;color:#fff;display:flex;flex-direction:column;gap:9px;overflow:hidden}
+  .screen .logo{width:38px;height:38px;border-radius:50%;border:1px solid rgba(255,255,255,.6);display:grid;place-items:center;font-family:"Cormorant Garamond";font-size:1.2rem;align-self:center}
+  .screen h4{font-family:"Cormorant Garamond";font-weight:400;font-size:1.3rem;text-align:center;line-height:1.1}
+  .bar{height:7px;border-radius:4px;background:rgba(255,255,255,.18);overflow:hidden}
+  .bar i{display:block;height:100%;background:linear-gradient(90deg,#e3c8f5,#fff);width:0;animation:load 3.5s ease-in-out infinite}
+  @keyframes load{0%{width:5%}70%,100%{width:88%}}
+  .row{display:flex;justify-content:space-between;font-family:"Space Mono";font-size:.55rem;opacity:.85}
+  .line{height:5px;background:rgba(255,255,255,.15);border-radius:3px}
+  .receipt{position:absolute;left:150px;top:-20px;width:150px;height:230px;background:#faf6fd;transform:rotate(9deg);z-index:-1;
+    padding:16px 12px;font-family:"Space Mono";font-size:.55rem;color:var(--plum);box-shadow:0 20px 40px rgba(0,0,0,.3)}
+  .receipt hr{border:none;border-top:1px dashed #c9b3d9;margin:8px 0}
+
+  /* NOTIFY BAND */
+  .band{background:var(--plum);color:#fff;text-align:center;padding:64px 0 56px}
+  .band h2{font-size:clamp(1.7rem,3.5vw,2.3rem)}
+  .band .sub{font-size:.9rem;opacity:.85;margin-bottom:28px}
+  .counter{display:flex;justify-content:center;gap:14px;margin:0 auto 30px}
+  .counter div{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);padding:12px 16px;min-width:74px}
+  .counter b{display:block;font-family:"Cormorant Garamond";font-size:2rem;font-weight:500;line-height:1}
+  .counter span{font-family:"Space Mono";font-size:.6rem;letter-spacing:.15em;opacity:.7}
+  form{max-width:400px;margin:0 auto;display:grid;gap:10px}
+  input{padding:.8rem 1rem;border:1px solid transparent;font:inherit;font-size:.85rem;outline:none}
+  input:focus{border-color:var(--gold)}
+  form .btn{justify-content:center;background:var(--plum-deep);box-shadow:none;padding:.9rem}
+  form .btn:hover{background:#1c0c28}
+  .fine{font-size:.72rem;font-style:italic;opacity:.75;max-width:520px;margin:26px auto 0}
+  .thanks{display:none;font-family:"Cormorant Garamond";font-size:1.5rem}
+
+  /* WHAT'S COMING */
+  .coming{padding:90px 0}
+  .coming .wrap{display:grid;grid-template-columns:1fr 1.1fr;gap:70px;align-items:center}
+  .photo{position:relative;justify-self:center}
+  .photo .frame{width:270px;height:360px;background:linear-gradient(170deg,#efe6f6,#cdb5e0);position:relative;overflow:hidden;
+    display:flex;align-items:center;justify-content:center}
+  .ring{position:absolute;top:-55px;left:-75px;width:190px;height:190px;border-radius:50%;
+    border:9px solid rgba(123,79,163,.35);box-shadow:inset 0 0 0 16px transparent,0 0 0 6px rgba(123,79,163,.12)}
+  .ring::after{content:"";position:absolute;inset:18px;border-radius:50%;border:3px solid rgba(123,79,163,.3)}
+  .gear{animation:spin 14s linear infinite;transform-origin:center}
+  .gear.rev{animation-direction:reverse;animation-duration:9s}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .coming h2{font-size:2.3rem;margin:.6rem 0 1.4rem;color:var(--plum-deep)}
+  .list{list-style:none;margin-bottom:30px}
+  .list li{display:flex;gap:14px;align-items:flex-start;padding:15px 0;border-bottom:1px solid #d9c8e6;font-size:.92rem}
+  .list li:last-child{border:none}
+  .list svg{flex:none;margin-top:4px}
+
+  /* TESTIMONIAL / PROMISE */
+  .quote{background:var(--plum);color:#fff;text-align:center;padding:80px 0}
+  .avatar{width:86px;height:86px;border-radius:50%;margin:0 auto 22px;background:linear-gradient(135deg,#c9a7e0,#7b4fa3);
+    display:grid;place-items:center;font-family:"Cormorant Garamond";font-size:2.2rem;border:3px solid rgba(255,255,255,.3)}
+  .quote h2{font-size:clamp(1.7rem,3.5vw,2.4rem);margin-bottom:18px}
+  .quote p{max-width:620px;margin:0 auto 14px;font-size:.92rem;opacity:.9}
+  .quote .sig{font-family:"Space Mono";font-size:.72rem;letter-spacing:.15em;margin-top:24px}
+
+  /* ABOUT */
+  .about{padding:90px 0 110px}
+  .about .wrap{display:grid;grid-template-columns:1fr 1fr;align-items:stretch;position:relative;max-width:880px}
+  .about .text{background:var(--blush);padding:60px 46px;text-align:center;margin-top:-20px}
+  .about .text .eyebrow{color:var(--violet)}
+  .about h2{font-size:2.5rem;margin:.5rem 0 1rem}
+  .about hr{width:110px;border:none;border-top:1px solid var(--violet);margin:0 auto 1.4rem}
+  .about p{font-size:.88rem;color:var(--muted);margin-bottom:1rem}
+  .storefront{background:linear-gradient(180deg,#5b2d7a,#2f1640);position:relative;display:flex;align-items:flex-end;justify-content:center;min-height:420px;overflow:hidden}
+  .stamp{position:absolute;right:-40px;top:-55px;width:120px;height:120px;z-index:3;animation:spin 25s linear infinite}
+  footer{text-align:center;padding:30px 16px;font-size:.75rem;color:var(--muted);border-top:1px solid #eee}
+
+  @media (max-width:820px){
+    .hero{grid-template-columns:1fr}
+    .hero-left{justify-content:center;padding:40px 16px}
+    .card{margin:0;padding:40px 28px}
+    .hero-right{min-height:380px}
+    .device{left:50%;transform:translate(-70%,-50%) rotate(-4deg);animation:none}
+    .coming .wrap,.about .wrap{grid-template-columns:1fr;gap:50px}
+    .ring{left:-40px}
+    .about .text{margin:0;padding:44px 24px}
+    .stamp{right:10px;top:-40px;width:90px;height:90px}
+    .counter div{min-width:62px;padding:10px}
+  }
+</style>
+</head>
+<body>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-left">
+    <div class="card reveal">
+      <div class="status"><span class="dot"></span><span class="eyebrow">System upgrade in progress</span></div>
+      <h1>Your new <em>Duaqabe</em> system is on its way</h1>
+      <p>We're polishing every shelf, every scan and every receipt. Duaqabe General Shop is upgrading its point‑of‑sale system so you can shop faster, smoother and smarter.</p>
+      <p>Hang tight. We're adding the final touches and will be back very soon, better than ever.</p>
+      <a href="#notify" class="btn" style="margin-top:14px">Notify me at launch <span class="arr">→</span></a>
+    </div>
+  </div>
+  <div class="hero-right">
+    <span class="orb a"></span><span class="orb b"></span>
+    <div class="device">
+      <div class="receipt">
+        <b>DUAQABE GENERAL</b><br>RECEIPT #2026<hr>
+        Speed ........ ↑↑<br>Stability .... ↑↑<br>Design ....... NEW<br>Checkout ..... FAST<hr>
+        TOTAL: BETTER<hr>Thank you for<br>your patience ♥
+      </div>
+      <div class="tablet"><div class="screen">
+        <div class="logo">D</div>
+        <h4>Duaqabe<br><i>General Shop</i></h4>
+        <div class="row"><span>UPGRADING</span><span id="pct">88%</span></div>
+        <div class="bar"><i></i></div>
+        <div class="line"></div><div class="line" style="width:70%"></div><div class="line" style="width:85%"></div>
+        <div class="row" style="margin-top:auto"><span>v2.0</span><span>POS</span></div>
+      </div></div>
+    </div>
+  </div>
+</section>
+
+<!-- NOTIFY -->
+<section class="band" id="notify">
+  <div class="wrap reveal">
+    <h2>Be the first to know when we're back</h2>
+    <p class="sub">The upgrade is almost done. Here's roughly how long until the doors reopen:</p>
+    <div class="counter">
+      <div><b id="d">00</b><span>DAYS</span></div>
+      <div><b id="h">00</b><span>HRS</span></div>
+      <div><b id="m">00</b><span>MIN</span></div>
+      <div><b id="s">00</b><span>SEC</span></div>
+    </div>
+    <form id="f">
+      <input type="text" placeholder="First name" required>
+      <input type="email" placeholder="Email address" required>
+      <button class="btn" type="submit">Notify me</button>
+    </form>
+    <p class="thanks" id="thanks">Thank you! We'll let you know the moment we're live ✨</p>
+    <p class="fine">We'll only email you about our relaunch and the occasional shop offer. Unsubscribe any time with a single click.</p>
+  </div>
+</section>
+
+<!-- WHAT'S COMING -->
+<section class="coming">
+  <div class="wrap">
+    <div class="photo reveal">
+      <div class="ring"></div>
+      <div class="frame">
+        <svg width="200" height="200" viewBox="0 0 200 200" aria-hidden="true">
+          <g class="gear" style="transform-origin:80px 90px">
+            <path fill="#4b2563" d="M80 50l8 0 3 12 10 4 10-7 6 6-7 10 4 10 12 3 0 8-12 3-4 10 7 10-6 6-10-7-10 4-3 12-8 0-3-12-10-4-10 7-6-6 7-10-4-10-12-3 0-8 12-3 4-10-7-10 6-6 10 7 10-4z"/>
+            <circle cx="84" cy="90" r="14" fill="#e9def2"/>
+          </g>
+          <g class="gear rev" style="transform-origin:140px 140px">
+            <path fill="#7b4fa3" d="M137 115h6l2 8 6 3 7-4 4 4-4 7 3 6 8 2v6l-8 2-3 6 4 7-4 4-7-4-6 3-2 8h-6l-2-8-6-3-7 4-4-4 4-7-3-6-8-2v-6l8-2 3-6-4-7 4-4 7 4 6-3z"/>
+            <circle cx="140" cy="140" r="9" fill="#e9def2"/>
+          </g>
+        </svg>
+      </div>
+    </div>
+    <div class="reveal">
+      <span class="eyebrow" style="color:var(--violet)">What's coming</span>
+      <h2>With the new system, you'll enjoy:</h2>
+      <ul class="list">
+        <li><svg width="16" height="14" viewBox="0 0 16 14"><path d="M1 7l5 5L15 1" stroke="#4b2563" stroke-width="2.5" fill="none"/></svg>Lightning‑fast checkout, so less time in line and more time for you</li>
+        <li><svg width="16" height="14" viewBox="0 0 16 14"><path d="M1 7l5 5L15 1" stroke="#4b2563" stroke-width="2.5" fill="none"/></svg>Accurate, real‑time stock so you always know what's on the shelf</li>
+        <li><svg width="16" height="14" viewBox="0 0 16 14"><path d="M1 7l5 5L15 1" stroke="#4b2563" stroke-width="2.5" fill="none"/></svg>Clear digital and printed receipts for every purchase</li>
+        <li><svg width="16" height="14" viewBox="0 0 16 14"><path d="M1 7l5 5L15 1" stroke="#4b2563" stroke-width="2.5" fill="none"/></svg>A more reliable, secure system <i>(built to keep running smoothly)</i></li>
+      </ul>
+      <a href="#notify" class="btn">Keep me posted <span class="arr">→</span></a>
+    </div>
+  </div>
+</section>
+
+<!-- PROMISE -->
+<section class="quote">
+  <div class="wrap reveal">
+    <div class="avatar">D</div>
+    <h2>"Good things take a little time."</h2>
+    <p>We could have kept things as they were, but our customers deserve better. This upgrade is about serving you faster, keeping our shelves organised and making every visit a pleasure.</p>
+    <p>Thank you for your patience while we build something we're truly proud of. We can't wait to welcome you back.</p>
+    <p class="sig">— THE DUAQABE GENERAL SHOP TEAM</p>
+  </div>
+</section>
+
+<!-- ABOUT -->
+<section class="about">
+  <div class="wrap">
+    <div class="text reveal">
+      <span class="eyebrow">The shop behind the upgrade</span>
+      <h2>Hello, we're Duaqabe</h2>
+      <hr>
+      <p>Duaqabe General Shop is your friendly neighbourhood store for everyday essentials, from groceries and household goods to the little things you didn't know you needed.</p>
+      <p>Our shop is where neighbours meet, and we want every visit to feel quick, easy and welcoming. That's why we're investing in a brand‑new point‑of‑sale system.</p>
+      <p>We'll be back shortly with the same warm service and a much smoother experience. See you soon!</p>
+    </div>
+    <div class="storefront reveal">
+      <svg class="stamp" viewBox="0 0 120 120" aria-hidden="true">
+        <defs><path id="c" d="M60 60m-44 0a44 44 0 1 1 88 0a44 44 0 1 1-88 0"/></defs>
+        <circle cx="60" cy="60" r="56" fill="#fff" stroke="#4b2563"/>
+        <text font-family="Space Mono" font-size="10" fill="#4b2563" letter-spacing="3"><textPath href="#c">DUAQABE • GENERAL SHOP • EST •</textPath></text>
+        <text x="60" y="68" text-anchor="middle" font-family="Cormorant Garamond" font-size="26" fill="#4b2563">D</text>
+      </svg>
+      <svg viewBox="0 0 300 300" width="100%" style="max-width:340px" aria-hidden="true">
+        <rect x="40" y="110" width="220" height="190" fill="#f6f1fa"/>
+        <path d="M30 110h240l-15-45H45z" fill="#c9a7e0"/>
+        <g fill="#7b4fa3"><path d="M30 110h40v14a20 20 0 0 1-40 0z"/><path d="M110 110h40v14a20 20 0 0 1-40 0z"/><path d="M190 110h40v14a20 20 0 0 1-40 0z"/></g>
+        <g fill="#fff"><path d="M70 110h40v14a20 20 0 0 1-40 0z"/><path d="M150 110h40v14a20 20 0 0 1-40 0z"/><path d="M230 110h40v14a20 20 0 0 1-40 0z"/></g>
+        <rect x="70" y="40" width="160" height="28" fill="#4b2563"/>
+        <text x="150" y="59" text-anchor="middle" font-family="Space Mono" font-size="11" fill="#fff" letter-spacing="2">DUAQABE</text>
+        <rect x="60" y="170" width="90" height="70" fill="#e9def2" stroke="#4b2563" stroke-width="3"/>
+        <rect x="175" y="170" width="65" height="130" fill="#4b2563"/>
+        <rect x="183" y="190" width="49" height="30" fill="#fff"/>
+        <text x="207" y="203" text-anchor="middle" font-family="Space Mono" font-size="7" fill="#4b2563">BACK</text>
+        <text x="207" y="214" text-anchor="middle" font-family="Space Mono" font-size="7" fill="#4b2563">SOON</text>
+        <g fill="#7b4fa3"><rect x="72" y="205" width="14" height="35"/><rect x="92" y="190" width="14" height="50"/><rect x="112" y="215" width="14" height="25"/><rect x="130" y="198" width="12" height="42"/></g>
+      </svg>
+    </div>
+  </div>
+</section>
+
+<footer>© <span id="yr"></span> Duaqabe General Shop · Upgrading our system to serve you better</footer>
+
+<script>
+  // reveal on scroll
+  const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target)}}),{threshold:.15});
+  document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
+
+  // countdown: set your launch date here
+  const LAUNCH=new Date(Date.now()+ (()=>{try{const v=+localStorage.getItem('dq_launch');if(v>Date.now())return v-Date.now()}catch(e){}return 5*864e5})());
+  try{localStorage.setItem('dq_launch',LAUNCH.getTime())}catch(e){}
+  const pad=n=>String(n).padStart(2,'0');
+  function tick(){
+    let t=Math.max(0,LAUNCH-Date.now())/1000;
+    d.textContent=pad(Math.floor(t/86400));h.textContent=pad(Math.floor(t%86400/3600));
+    m.textContent=pad(Math.floor(t%3600/60));s.textContent=pad(Math.floor(t%60));
+  }
+  tick();setInterval(tick,1000);
+
+  // fake progress %
+  let p=72;setInterval(()=>{p=p>=97?72:p+1;pct.textContent=p+'%'},400);
+
+  f.addEventListener('submit',e=>{e.preventDefault();f.style.display='none';thanks.style.display='block'});
+  yr.textContent=new Date().getFullYear();
+</script>
+</body>
+</html>

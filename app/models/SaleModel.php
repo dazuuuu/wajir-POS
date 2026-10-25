@@ -9,8 +9,10 @@ class SaleModel extends Model
     public function __construct(?\PDO $db = null)
     {
         parent::__construct($db);
-        $this->ensureSchema();
-        ReturnModel::ensureTableExists($this->db);
+        \SchemaHeal::once(\SchemaHeal::key(__FILE__), function () {
+            $this->ensureSchema();
+            ReturnModel::ensureTableExists($this->db);
+        });
     }
 
     /**

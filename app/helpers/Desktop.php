@@ -9,6 +9,7 @@
 //   Desktop::dailyBackup()        one copy of the database per day, last 30 kept
 //   Desktop::backups()            the saved copies, newest first
 //   Desktop::importFromWebsite()  copy the whole shop from the hosted POS once
+//   Desktop::importBundled()      load the shop that came inside the zip
 
 class Desktop
 {
@@ -132,98 +133,48 @@ class Desktop
             if (!is_array($data) || empty($data['ok']) || !is_array($data['tables'] ?? null)) {
                 return ['ok' => false, 'error' => 'The website did not send the shop data (HTTP ' . $export['code'] . '). Upload public/api/backup/export.php to the website first.'];
             }
-
-            $db = Database::pdo();
-            self::ensureAllTables($db);
-            $rows = 0;
-            $tables = 0;
-            $db->exec('PRAGMA foreign_keys = OFF');
-            $db->beginTransaction();
-            foreach ($data['tables'] as $table => $list) {
-                if (!preg_match('/^[A-Za-z0-9_]+$/', (string) $table) || !is_array($list)) {
-                    continue;
-                }
-                $cols = self::columns($db, $table);
-                if (!$cols) {
-                    if (!$list) {
-                        continue;
-                    }
-                    // A table this install doesn't have yet: create it plainly.
-                    $names = array_keys($list[0]);
-                    $db->exec('CREATE TABLE IF NOT EXISTS "' . $table . '" (' . implode(', ', array_map(fn($c) => '"' . str_replace('"', '', $c) . '"', $names)) . ')');
-                    $cols = $names;
-                }
-                $db->exec('DELETE FROM "' . $table . '"');
-                $tables++;
-                $stmts = [];
-                foreach ($list as $row) {
-                    $row = array_intersect_key($row, array_flip($cols));
-                    if (!$row) {
-                        continue;
-                    }
-                    $sig = implode(',', array_keys($row));
-                    if (!isset($stmts[$sig])) {
-                        $stmts[$sig] = $db->prepare('INSERT INTO "' . $table . '" ("' . implode('","', array_keys($row)) . '") VALUES ('
-                            . implode(',', array_fill(0, count($row), '?')) . ')');
-                    }
-                    $stmts[$sig]->execute(array_values($row));
-                    $rows++;
-                }
-            }
-            $db->commit();
-            $db->exec('PRAGMA foreign_keys = ON');
-
-            // Pictures and documents.
-            $copied = 0;
-            $missed = 0;
-            foreach ((array) ($data['files'] ?? []) as $rel) {
-                $rel = ltrim(str_replace('\\', '/', (string) $rel), '/');
-                if ($rel === '' || strpos($rel, '..') !== false) {
-                    continue;
-                }
+            return self::load($data, function (string $rel) use ($http, $site): ?string {
                 $r = $http($site . '/' . str_replace('%2F', '/', rawurlencode($rel)), null, 60);
-                if ($r['code'] === 200 && $r['body'] !== '') {
-                    $dest = PUBLIC_ROOT . '/' . $rel;
-                    if (!is_dir(dirname($dest))) {
-                        @mkdir(dirname($dest), 0775, true);
-                    }
-                    @file_put_contents($dest, $r['body']) !== false ? $copied++ : $missed++;
-                } else {
-                    $missed++;
-                }
-            }
-            return ['ok' => true, 'error' => null, 'tables' => $tables, 'rows' => $rows, 'files' => $copied, 'files_missed' => $missed];
-        } catch (Throwable $e) {
-            if (isset($db) && $db->inTransaction()) {
-                $db->rollBack();
-            }
-            error_log('Desktop import: ' . $e->getMessage());
-            return ['ok' => false, 'error' => 'Import stopped: ' . $e->getMessage() . ' — nothing was changed.'];
+                return $r['code'] === 200 && $r['body'] !== '' ? $r['body'] : null;
+            });
         } finally {
             @unlink($jar);
         }
     }
 
-    /** Let every model create its tables, so imported rows have somewhere to go. */
-    private static function ensureAllTables(PDO $db): void
+    /** The shop data that came inside the zip ("Download with my shop" on the website). */
+    public static function bundledFile(): string
     {
-        foreach (glob(APP_ROOT . '/models/*.php') ?: [] as $file) {
-            $cls = 'Models\\' . basename($file, '.php');
-            try {
-                if (class_exists($cls) && !(new ReflectionClass($cls))->isAbstract()) {
-                    new $cls($db);
-                }
-            } catch (Throwable $ignored) {
-            }
-        }
+        return self::dataDir() . '/shop-import.json';
     }
 
-    private static function columns(PDO $db, string $table): array
+    /**
+     * Load data/shop-import.json into a fresh install, then delete it (it holds
+     * password hashes). The pictures are already in place from the zip.
+     */
+    public static function importBundled(): array
     {
-        try {
-            return array_column($db->query('PRAGMA table_info("' . $table . '")')->fetchAll(PDO::FETCH_ASSOC), 'name');
-        } catch (Throwable $e) {
-            return [];
+        @set_time_limit(0);
+        @ini_set('memory_limit', '1024M');
+        $file = self::bundledFile();
+        $data = json_decode((string) @file_get_contents($file), true);
+        if (!is_array($data) || empty($data['ok']) || !is_array($data['tables'] ?? null)) {
+            return ['ok' => false, 'error' => 'The shop data in this download is damaged. Download it again from the website.'];
         }
+        $r = self::load($data, null);
+        if ($r['ok']) {
+            DesktopSync::afterImport();
+            @unlink($file);
+        }
+        return $r;
+    }
+
+    /**
+     * Replace the local data with an export. $fetchFile(rel) returns a picture's
+     * bytes (null when it couldn't be fetched); null means they're already here.
+     */
+    private static function load(array $data, ?callable $fetchFile): array
+    {
+        return ShopImport::load($data, $fetchFile);
     }
 }

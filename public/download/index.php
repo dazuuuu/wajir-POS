@@ -32,9 +32,67 @@ ob_start();
       <h2 class="h5 fw-bold">Shop computer version</h2>
       <p class="text-muted small">Runs on the shop's Windows computer and <strong>never needs the internet</strong> — like Microsoft Office. Phones and tablets in the shop use it over the shop Wi-Fi.</p>
       <?php if ($hasZip): ?>
-        <a class="btn btn-primary btn-lg w-100 no-print" href="<?php echo htmlspecialchars(public_url($zipRel)); ?>" download>
-          <i class="fas fa-download me-1"></i>Download for Windows</a>
-        <div class="text-muted small mt-2 text-center"><?php echo $sizeMb; ?> MB · updated <?php echo htmlspecialchars($updated); ?> · Windows 10 or 11</div>
+        <div class="no-print" id="dlBox">
+          <button type="button" class="btn btn-primary btn-lg w-100" id="dlBackup"><i class="fas fa-database me-1"></i>Back up my shop</button>
+          <div class="d-none mt-3" id="dlProgress">
+            <div class="d-flex justify-content-between small mb-1"><span id="dlStep">Starting…</span><strong id="dlPct">0%</strong></div>
+            <div class="progress" style="height:12px;"><div class="progress-bar progress-bar-striped progress-bar-animated" id="dlBar" role="progressbar" style="width:0%" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div></div>
+            <div class="text-muted small mt-1">Keep this page open.</div>
+          </div>
+          <div class="alert alert-danger small mt-3 mb-0 d-none" id="dlError"></div>
+          <a class="btn btn-success btn-lg w-100 mt-3 d-none" id="dlGet" href="#"><i class="fas fa-download me-1"></i>Download offline POS</a>
+        </div>
+        <div class="text-muted small mt-2 text-center">Step 1 backs up your products, stock, customers, sales, staff and pictures. When it reaches 100%, step 2 downloads the POS with all of it inside — log in with the same email and password as this website.</div>
+        <div class="text-muted small mt-2 text-center">About <?php echo $sizeMb; ?> MB + your pictures · updated <?php echo htmlspecialchars($updated); ?> · Windows 10 or 11</div>
+        <a class="d-block small text-center mt-1 no-print" href="<?php echo htmlspecialchars(public_url($zipRel)); ?>" download>Empty version (new shop)</a>
+        <script>
+        (function () {
+          var url = <?php echo json_encode(public_url('download/my-shop.php')); ?>;
+          var $ = function (id) { return document.getElementById(id); };
+          var show = function (el, on) { el.classList.toggle('d-none', !on); };
+          var fail = function (msg) {
+            $('dlError').textContent = msg; show($('dlError'), true); show($('dlProgress'), false);
+            $('dlBackup').disabled = false; $('dlBackup').innerHTML = '<i class="fas fa-rotate me-1"></i>Try again';
+          };
+          var setPct = function (p, step) {
+            $('dlBar').style.width = p + '%'; $('dlBar').setAttribute('aria-valuenow', p);
+            $('dlPct').textContent = p + '%'; if (step) $('dlStep').textContent = step;
+          };
+          $('dlBackup').addEventListener('click', function () {
+            var btn = this;
+            btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Backing up…';
+            show($('dlError'), false); show($('dlGet'), false); show($('dlProgress'), true); setPct(0, 'Starting…');
+            fetch(url + '?action=start', { method: 'POST', credentials: 'same-origin' })
+              .then(function (r) { return r.json(); })
+              .then(function (d) {
+                if (!d.id) return fail(d.error || 'Could not start the backup.');
+                var poll = function () {
+                  fetch(url + '?action=progress&id=' + d.id, { credentials: 'same-origin', cache: 'no-store' })
+                    .then(function (r) { return r.json(); })
+                    .then(function (s) {
+                      if (s.error) return fail(s.error);
+                      setPct(s.percent || 0, s.step);
+                      if (s.done) {
+                        $('dlBar').classList.remove('progress-bar-animated');
+                        btn.innerHTML = '<i class="fas fa-check me-1"></i>Backup complete';
+                        $('dlGet').href = url + '?action=get&id=' + d.id; show($('dlGet'), true);
+                        return;
+                      }
+                      setTimeout(poll, 800);
+                    })
+                    .catch(function () { setTimeout(poll, 2000); });
+                };
+                poll();
+              })
+              .catch(function () { fail('No connection to the website. Check the internet and try again.'); });
+          });
+          // One download per backup: the file is removed once it's sent.
+          $('dlGet').addEventListener('click', function () {
+            var a = this; setTimeout(function () { show(a, false); $('dlBackup').disabled = false;
+              $('dlBackup').innerHTML = '<i class="fas fa-database me-1"></i>Back up again'; }, 1500);
+          });
+        })();
+        </script>
       <?php else: ?>
         <div class="alert alert-warning small mb-0">The download isn't on the website yet. Upload <code>ShopPOS-Windows.zip</code> into <code>public/downloads/</code> in cPanel → File Manager, then reload this page.</div>
       <?php endif; ?>
@@ -60,13 +118,13 @@ ob_start();
 
       <div class="ig-step"><div class="ig-num">1</div><div>
         <h3>Download</h3>
-        <p>On the shop computer, open this page and click <strong>Download for Windows</strong>. The file is called <code>ShopPOS-Windows.zip</code>.</p>
+        <p>On the shop computer, open this page and click <strong>Back up my shop</strong>. Wait for it to reach <strong>100%</strong>, then click <strong>Download offline POS</strong>. The file is named after your shop, e.g. <code>ShopPOS-My-Shop.zip</code>.</p>
         <div class="ig-warn">If the browser says <em>"ShopPOS-Windows.zip isn't commonly downloaded"</em>: click the <strong>…</strong> (three dots) → <strong>Keep</strong> → <strong>Keep anyway</strong>.</div>
       </div></div>
 
       <div class="ig-step"><div class="ig-num">2</div><div>
         <h3>Unzip it to C:\ShopPOS</h3>
-        <p>Open the <strong>Downloads</strong> folder, <strong>right-click</strong> <code>ShopPOS-Windows.zip</code> → <strong>Extract All…</strong> → in the box type <code>C:\ShopPOS</code> → <strong>Extract</strong>.</p>
+        <p>Open the <strong>Downloads</strong> folder, <strong>right-click</strong> the downloaded zip (<code>ShopPOS-….zip</code>) → <strong>Extract All…</strong> → in the box type <code>C:\ShopPOS</code> → <strong>Extract</strong>.</p>
         <div class="ig-warn">Don't run anything from inside the zip, and don't leave it in Downloads or on a flash disk — the shop's data will live in this folder.</div>
       </div></div>
 
@@ -82,14 +140,9 @@ ob_start();
       </div></div>
 
       <div class="ig-step"><div class="ig-num">4</div><div>
-        <h3>Bring your shop over</h3>
-        <p>The POS opens on a setup screen. Scroll to <strong>"Or bring your shop over from the website"</strong> and fill in:</p>
-        <ul>
-          <li><strong>Website address:</strong> <code><?php echo htmlspecialchars($siteUrl); ?></code></li>
-          <li><strong>Owner email</strong> and <strong>password</strong> — the same ones you use on this website</li>
-        </ul>
-        <p>Click <strong>Import my shop</strong> and wait (a few minutes for a big shop). Products, stock, customers, sales history, staff and pictures are copied. Then log in with the same email and password.</p>
-        <div class="ig-warn">Starting a brand-new shop instead? Use <strong>Create the owner account</strong> at the top of that screen.</div>
+        <h3>Log in</h3>
+        <p>The first time it opens, the POS loads your shop by itself (a few seconds, longer for a big shop) and shows the login page. Log in with the <strong>same email and password</strong> you use on this website. Staff use their same PINs.</p>
+        <div class="ig-warn">The download is a copy of your shop <strong>at the moment you clicked</strong>. Download it on the day you install, and keep the zip private: it contains your shop's data.</div>
       </div></div>
 
       <div class="ig-step"><div class="ig-num">5</div><div>
@@ -97,6 +150,7 @@ ob_start();
         <ul class="mb-2">
           <li><strong>On the computer:</strong> double-click <strong>Shop POS</strong> on the Desktop (it also starts by itself). It opens at <code>http://localhost:8080</code>.</li>
           <li><strong>On phones/tablets:</strong> connect to the <strong>shop Wi-Fi</strong>, open the browser and type the address shown in the black <em>Shop POS</em> window, e.g. <code>http://192.168.1.20:8080</code>. The Wi-Fi router only needs to be switched on — no internet.</li>
+          <li><strong>Back to the website:</strong> whenever the computer has internet, everything done on it (sales, invoices, stock, payments, credit sales…) is copied to this website by itself every few minutes. Settings → Backups shows when it last synced.</li>
           <li><strong>Shutting down:</strong> double-click <strong>Stop POS</strong> in the folder (or just turn the computer off).</li>
         </ul>
       </div></div>

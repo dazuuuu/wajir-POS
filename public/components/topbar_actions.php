@@ -13,6 +13,8 @@ try {
 <div class="t-top-actions d-flex align-items-center">
   <span class="trk-tb-btn trk-tb-date d-none d-xl-inline-flex"><i class="far fa-calendar"></i><?php echo date('D, j M Y'); ?></span>
 
+  <button class="trk-tb-btn" type="button" id="trkSideToggle" title="Switch sidebar: dark / light" aria-label="Switch sidebar between dark and light"><i class="fas fa-circle-half-stroke"></i></button>
+
   <div class="dropdown">
     <button class="trk-tb-btn" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="Notifications" aria-label="Notifications">
       <i class="fas fa-bell"></i><?php if ($__notes): ?><span class="trk-dot"><?php echo count($__notes); ?></span><?php endif; ?>
@@ -48,6 +50,14 @@ try {
   </div>
 </div>
 <script>
+(function () {
+  // Sidebar style: black with white menus (default) or white with purple menus.
+  var t = document.getElementById('trkSideToggle');
+  if (t) t.addEventListener('click', function () {
+    var light = document.body.classList.toggle('trk-side-light');
+    try { localStorage.setItem('trkSide', light ? 'light' : 'dark'); } catch (e) {}
+  });
+})();
 (function () {
   // Don't let someone log out without realising offline sales are still on
   // this device only (logging out can make the next sync wait for a re-login).

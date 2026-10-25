@@ -5,18 +5,22 @@
    with body.trk so they win over the component styles printed in the page. */
 
 body.trk {
-  --trk-side: #2c3e50;
-  --trk-side-dark: #243342;
-  --trk-side-deep: #1e2b38;
-  --trk-side-text: #b9c3cd;
-  --trk-green: #36c47a;
-  --trk-green-dark: #2aa865;
+  --trk-side: #111111;
+  --trk-side-dark: #1f1f1f;
+  --trk-side-deep: #000000;
+  --trk-side-text: #f2f2f2;
+  --trk-side-hi: #ffffff;
+  --trk-side-mute: #c9c9c9;
+  --trk-side-line: rgba(255,255,255,.06);
+  --trk-green: #7c3aed;
+  --trk-green-dark: #6d28d9;
+  --trk-green-light: #f3ecff;
   --trk-bg: #ececec;
   --trk-line: #e3e3e3;
   --trk-ink: #333;
   --trk-red: #ec4c3c;
   --trk-orange: #f39c12;
-  --trk-blue: #3498db;
+  --trk-blue: #1e3a8a;
   --trk-teal: #1abc9c;
   --trk-yellow: #f1c40f;
   --trk-w: 230px;
@@ -46,10 +50,10 @@ body.trk .t-link {
   font-size: .84rem; font-weight: 400; border-bottom: 1px solid rgba(255,255,255,.04); box-shadow: none;
 }
 body.trk .t-link i { color: var(--trk-side-text); width: 16px; font-size: .86rem; opacity: .85; }
-body.trk .t-link:hover { background: var(--trk-side-dark); color: #fff; }
-body.trk .t-link:hover i { color: #fff; }
+body.trk .t-link:hover { background: var(--trk-side-dark); color: var(--trk-side-hi); }
+body.trk .t-link:hover i { color: var(--trk-side-hi); }
 body.trk .t-link.active, body.trk .t-group.open > .t-group-toggle {
-  background: var(--trk-side-deep); color: #fff; font-weight: 600; box-shadow: inset 3px 0 0 var(--trk-green);
+  background: var(--trk-side-deep); color: var(--trk-side-hi); font-weight: 600; box-shadow: inset 3px 0 0 var(--trk-green);
 }
 body.trk .t-link.active i, body.trk .t-group.open > .t-group-toggle i { color: var(--trk-green); opacity: 1; }
 body.trk .t-group { margin: 0; }
@@ -59,13 +63,13 @@ body.trk .t-subnav { padding: 4px 0 6px; background: var(--trk-side-deep); }
 body.trk .t-sublink {
   border-radius: 0; margin: 0; padding: 8px 18px 8px 46px; color: #93a2b1; font-size: .8rem; position: relative;
 }
-body.trk .t-sublink::before { content: ""; position: absolute; left: 25px; top: 50%; width: 6px; height: 6px; margin-top: -3px; border-radius: 50%; border: 1px solid #5d7286; }
-body.trk .t-sublink:hover { background: transparent; color: #fff; }
-body.trk .t-sublink.active { background: transparent; color: #fff; font-weight: 600; }
+body.trk .t-sublink::before { content: ""; position: absolute; left: 25px; top: 50%; width: 6px; height: 6px; margin-top: -3px; border-radius: 50%; border: 1px solid var(--trk-side-mute); }
+body.trk .t-sublink:hover { background: transparent; color: var(--trk-side-hi); }
+body.trk .t-sublink.active { background: transparent; color: var(--trk-side-hi); font-weight: 600; }
 body.trk .t-sublink.active::before { background: var(--trk-green); border-color: var(--trk-green); }
-body.trk .t-subsection { color: #7f93a6; padding: 10px 18px 4px 46px; font-size: .68rem; }
-body.trk .t-nav hr { border-top-color: rgba(255,255,255,.08); }
-body.trk .t-sidebar-footer { background: var(--trk-side); border-top: 1px solid rgba(255,255,255,.06); padding: 0; }
+body.trk .t-subsection { color: var(--trk-side-mute); padding: 10px 18px 4px 46px; font-size: .68rem; }
+body.trk .t-nav hr { border-top-color: var(--trk-side-line); }
+body.trk .t-sidebar-footer { background: var(--trk-side); border-top: 1px solid var(--trk-side-line); padding: 0; }
 body.trk .t-sidebar-footer .t-link { color: var(--trk-side-text); }
 body.trk .t-nav::-webkit-scrollbar { width: 6px; }
 body.trk .t-nav::-webkit-scrollbar-thumb { background: rgba(255,255,255,.15); border-radius: 3px; }
@@ -115,12 +119,12 @@ body.trk .btn-outline-primary, body.trk .btn-outline-success {
   --bs-btn-hover-bg: var(--trk-green); --bs-btn-hover-border-color: var(--trk-green);
   --bs-btn-active-bg: var(--trk-green); --bs-btn-active-border-color: var(--trk-green);
 }
-body.trk a { color: #2a8f5a; }
+body.trk a { color: var(--trk-green-dark); }
 body.trk .t-sidebar a, body.trk .t-topbar a, body.trk .btn { color: inherit; }
 body.trk .btn-primary, body.trk .btn-success { color: #fff; }
 body.trk .text-primary { color: var(--trk-green-dark) !important; }
 body.trk .bg-primary, body.trk .badge.bg-primary { background-color: var(--trk-green) !important; }
-body.trk .form-control:focus, body.trk .form-select:focus { border-color: var(--trk-green); box-shadow: 0 0 0 .2rem rgba(54,196,122,.15); }
+body.trk .form-control:focus, body.trk .form-select:focus { border-color: var(--trk-green); box-shadow: 0 0 0 .2rem rgba(124,58,237,.15); }
 body.trk .t-flash { border-radius: 2px; }
 
 /* ---------- Top bar menus (bell, user) ---------- */
@@ -221,7 +225,7 @@ body.trk .t-flash { border-radius: 2px; }
   body.trk .m-tab.active { color: #fff !important; }
   body.trk .m-tab.active i { color: var(--trk-green); }
   body.trk .m-tab:active { background: rgba(255,255,255,.08) !important; }
-  body.trk .m-sheet a.active { color: var(--trk-green-dark); background: #effaf4; }
+  body.trk .m-sheet a.active { color: var(--trk-green-dark); background: var(--trk-green-light); }
 }
 @media (max-width: 420px) {
   .trk-stat .ic { flex-basis: 30%; }
@@ -237,8 +241,8 @@ body.trk .t-flash { border-radius: 2px; }
    Pages use --pos-violet/--pos-green for accents; in this theme that's the
    green, with navy for the "dark" elements. */
 body.trk {
-  --pos-violet: #36c47a; --pos-violet-dark: #2aa865; --pos-violet-light: #effaf4;
-  --pos-green: #36c47a; --pos-green-dark: #2aa865; --pos-green-light: #effaf4;
+  --pos-violet: #7c3aed; --pos-violet-dark: #6d28d9; --pos-violet-light: #f3ecff;
+  --pos-green: #7c3aed; --pos-green-dark: #6d28d9; --pos-green-light: #f3ecff;
   --pos-ink: #333;
 }
 
@@ -248,8 +252,8 @@ body.trk .dashboard-home .panel, body.trk .dashboard-home .metric, body.trk .das
 }
 body.trk .dashboard-home .wallets, body.trk .dashboard-home .chart-card, body.trk .dashboard-home .pnl-card { border-radius: 2px !important; }
 body.trk .dashboard-home .wallet { border-radius: 2px !important; }
-body.trk .dashboard-home .metric.hot { background: var(--trk-side) !important; }
-body.trk .dashboard-home .dark-action { background: var(--trk-side) !important; border-radius: 3px !important; color: #fff !important; }
+body.trk .dashboard-home .metric.hot { background: #111 !important; }
+body.trk .dashboard-home .dark-action { background: #111 !important; border-radius: 3px !important; color: #fff !important; }
 body.trk .dashboard-home .light-action { border-radius: 3px !important; }
 body.trk .dashboard-home .fin-greeting h1 { font-weight: 300; font-size: 1.5rem; }
 body.trk .dashboard-home .bar.profit { background: var(--trk-green) !important; }
@@ -279,3 +283,24 @@ body.trk .btn-success:hover, body.trk .btn-success:focus, body.trk .btn-success:
 body.trk .btn-outline-primary, body.trk .btn-outline-success { color: var(--trk-green-dark); border-color: var(--trk-green); background: transparent; }
 body.trk .btn-outline-primary:hover, body.trk .btn-outline-success:hover,
 body.trk .btn-outline-primary.active, body.trk .btn-outline-success.active { background-color: var(--trk-green); border-color: var(--trk-green); color: #fff; }
+
+
+/* ---------- Sidebar style toggle (topbar half-moon button) ----------
+   Default: black sidebar, white menus. body.trk-side-light: white sidebar,
+   purple menus. The purple brand block and banners stay the same. */
+body.trk.trk-side-light {
+  --trk-side: #ffffff;
+  --trk-side-dark: #f3ecff;
+  --trk-side-deep: #ede4ff;
+  --trk-side-text: #5b21b6;
+  --trk-side-hi: #4c1d95;
+  --trk-side-mute: #7c5bc4;
+  --trk-side-line: rgba(124,58,237,.08);
+}
+body.trk.trk-side-light .t-sidebar { border-right: 1px solid var(--trk-line); }
+body.trk.trk-side-light .t-nav::-webkit-scrollbar-thumb { background: rgba(124,58,237,.25); }
+body.trk.trk-side-light.trk-mini .t-group:hover .t-subnav::before { color: var(--trk-side-hi); }
+@media (max-width: 992px) {
+  body.trk.trk-side-light .m-tab { color: #7c5bc4 !important; }
+  body.trk.trk-side-light .m-tab.active { color: #4c1d95 !important; }
+}

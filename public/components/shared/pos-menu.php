@@ -18,8 +18,8 @@ $moduleOn = static fn(string $module): bool => Modules::enabled($module, $__tena
 
 $posOpen = $menuGroupOpen(['/shop', '/orders', '/sales', '/invoices', '/returns', '/customers', '/reports', '/data', '/documents', '/services']);
 $inventoryOpen = $menuGroupOpen(['/inventory', '/store', '/purchases', '/suppliers', '/stationery', '/stock', '/publishers', '/categories']);
-$financeOpen = $menuGroupOpen(['/finances', '/expenses', '/salary', '/payroll', '/commissions', '/taxes']);
-$settingsOpen = $menuGroupOpen(['/admins', '/staff', '/settings', '/updates', '/setup', '/backup', '/clean_migrations']);
+$financeOpen = $menuGroupOpen(['/finances', '/losses', '/expenses', '/salary', '/payroll', '/commissions', '/taxes']);
+$settingsOpen = $menuGroupOpen(['/admins', '/staff', '/settings', '/landing', '/updates', '/setup', '/backup', '/clean_migrations']);
 $menuUpcoming = [];
 if ($moduleOn('services')) {
     try {
@@ -65,7 +65,7 @@ if ($moduleOn('services')) {
       <a class="t-sublink <?php echo $menuOn('/reports/') && !$menuOn('/reports/inventory') ? 'active' : ''; ?>" href="<?php echo public_url('super/reports/'); ?>">Reports</a>
       <a class="t-sublink <?php echo $menuOn('/reports/inventory'); ?>" href="<?php echo public_url('super/reports/inventory.php'); ?>">Inventory &amp; finance report</a>
       <a class="t-sublink <?php echo $menuOn('/tracker/'); ?>" href="<?php echo public_url('super/tracker/'); ?>">Product Tracker</a>
-      <a class="t-sublink <?php echo $menuOn('/data'); ?>" href="<?php echo public_url('super/data/'); ?>">Data export</a>
+      <a class="t-sublink <?php echo $menuOn('/backup.php') ? '' : $menuOn('/data'); ?>" href="<?php echo public_url('super/data/'); ?>">Data export</a>
     <?php endif; ?>
     <?php if ($moduleOn('documents')): ?><a class="t-sublink <?php echo $menuOn('/documents'); ?>" href="<?php echo $menuRoute('super/documents/', 'staff/documents/'); ?>">Documents</a><?php endif; ?>
 
@@ -104,14 +104,16 @@ if ($moduleOn('services')) {
 </div>
 <?php endif; ?>
 
-<?php if ($menuOwner && ($moduleOn('finances') || $moduleOn('payroll') || $moduleOn('commissions'))): ?>
+<?php if ($menuOwner): ?>
 <div class="t-group <?php echo $financeOpen ? 'open' : ''; ?>" data-nav-group>
   <button type="button" class="t-link t-group-toggle <?php echo $financeOpen ? 'active' : ''; ?>" aria-expanded="<?php echo $financeOpen ? 'true' : 'false'; ?>">
     <i class="fas fa-coins"></i><span>Finances</span><i class="fas fa-chevron-down t-group-caret"></i>
   </button>
   <div class="t-subnav">
+    <a class="t-sublink <?php echo $menuOn('/finances/statement'); ?>" href="<?php echo public_url('super/finances/statement.php'); ?>">Transaction statement</a>
     <?php if ($moduleOn('finances')): ?>
-    <a class="t-sublink <?php echo $menuOn('/finances'); ?>" href="<?php echo public_url('super/finances/'); ?>">Finances</a>
+    <a class="t-sublink <?php echo $menuOn('/finances/statement') ? '' : $menuOn('/finances'); ?>" href="<?php echo public_url('super/finances/'); ?>">Finances</a>
+    <a class="t-sublink <?php echo $menuOn('/losses'); ?>" href="<?php echo public_url('super/losses/'); ?>">Loss tracker</a>
     <a class="t-sublink <?php echo $menuOn('/expenses'); ?>" href="<?php echo public_url('super/expenses/'); ?>">Expenses</a>
     <a class="t-sublink <?php echo $menuOn('/taxes'); ?>" href="<?php echo public_url('super/taxes/'); ?>">Taxes</a>
     <?php endif; ?>
@@ -122,6 +124,7 @@ if ($moduleOn('services')) {
 <?php endif; ?>
 
 <?php if ($menuOwner): ?>
+<a class="t-link <?php echo $menuOn('/data/backup.php'); ?>" href="<?php echo public_url('super/data/backup.php'); ?>"><i class="fas fa-database"></i><span>Backup &amp; Import</span></a>
 <div class="t-group <?php echo $settingsOpen ? 'open' : ''; ?>" data-nav-group>
   <button type="button" class="t-link t-group-toggle <?php echo $settingsOpen ? 'active' : ''; ?>" aria-expanded="<?php echo $settingsOpen ? 'true' : 'false'; ?>">
     <i class="fas fa-gears"></i><span>Settings</span><i class="fas fa-chevron-down t-group-caret"></i>
@@ -136,6 +139,7 @@ if ($moduleOn('services')) {
     <?php endif; ?>
     <a class="t-sublink <?php echo $menuOn('/clean_migrations'); ?>" href="<?php echo public_url('clean_migrations.php'); ?>">Clean records</a>
     <a class="t-sublink <?php echo $menuOn('/settings'); ?>" href="<?php echo public_url('super/settings/'); ?>">Settings toggles</a>
+    <?php if (TenantContext::role() === 'tenant_owner'): ?><a class="t-sublink <?php echo $menuOn('/landing'); ?>" href="<?php echo public_url('super/landing/'); ?>">Landing page</a><?php endif; ?>
     <?php if ((int) ($__tenant['owner_user_id'] ?? 0) === (int) TenantContext::userId()): ?>
       <a class="t-sublink <?php echo $menuOn('/updates'); ?>" href="<?php echo public_url('super/updates/'); ?>">System updates</a>
       <a class="t-sublink <?php echo $menuOn('/setup'); ?>" href="<?php echo public_url('setup/'); ?>">Owner account</a>

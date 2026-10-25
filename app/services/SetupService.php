@@ -52,6 +52,7 @@ class SetupService
 
     public function runFreshSchema(): array
     {
+        \SchemaHeal::forget();
         $file = APP_ROOT . '/databases/full_migration_db.sql';
         $sql = is_file($file) ? file_get_contents($file) : false;
         if ($sql === false) {
@@ -215,6 +216,45 @@ class SetupService
         return @file_put_contents(APP_ROOT . '/config/database.php', $php) !== false;
     }
 
+    public static function writeMailConfig(array $cfg): bool
+    {
+        $php = "<?php\n\n// app/config/mail.php — written by the /setup/ page on " . date('Y-m-d H:i:s') . ".\n\nreturn "
+            . var_export($cfg, true) . ";\n";
+        return @file_put_contents(APP_ROOT . '/config/mail.php', $php) !== false;
+    }
+
+    /** This site's login page as a full link, on whatever domain the setup is running on. */
+    public static function loginUrl(): string
+    {
+        $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+            || strtolower((string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https';
+        return ($https ? 'https' : 'http') . '://' . ($_SERVER['HTTP_HOST'] ?? 'localhost') . public_url('auth/login.php');
+    }
+
+    /**
+     * Tell the owner their POS is ready, with the link to log in. Returns ''
+     * when sent, otherwise why not (no email set up, or the send failed).
+     */
+    public static function sendWelcome(array $owner): string
+    {
+        $to = trim((string) ($owner['email'] ?? ''));
+        if ($to === '' || !is_file(APP_ROOT . '/config/mail.php')) {
+            return 'Email is not set up on this server.';
+        }
+        $h = static fn($v): string => htmlspecialchars((string) $v, ENT_QUOTES);
+        $shop = (string) ($owner['shop_name'] ?? 'your shop');
+        $url = self::loginUrl();
+        $html = '<div style="font-family:Arial,sans-serif;max-width:520px;color:#17151d">'
+            . '<h2 style="color:#4b006e">Your POS is ready</h2>'
+            . '<p>Hello ' . $h($owner['username'] ?? '') . ',</p>'
+            . '<p><strong>' . $h($shop) . '</strong> has been set up on its new POS with all its products, stock, customers, sales history and staff. You can start selling straight away.</p>'
+            . '<p style="margin:24px 0"><a href="' . $h($url) . '" style="background:#4b006e;color:#fff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:bold">Log in to your POS</a></p>'
+            . '<p>Login page: <a href="' . $h($url) . '">' . $h($url) . '</a><br>Email: <strong>' . $h($to) . '</strong><br>Password: the same one you used before. Your staff log in with their usual details too.</p>'
+            . '<p style="color:#6b7280;font-size:13px">Save the link above — this is where your shop lives now.</p></div>';
+        $sent = (new MailService())->send($to, 'Your POS for ' . $shop . ' is ready', $html);
+        return $sent ? '' : (MailService::lastError() ?: 'The email could not be sent.');
+    }
+
     /** Lock file: once an owner exists the setup page never offers the database form or a new owner again. */
     public static function lockFile(): string
     {
@@ -224,6 +264,44 @@ class SetupService
     public static function writeLock(): void
     {
         @file_put_contents(self::lockFile(), 'Owner created ' . date('c') . "\n");
+    }
+
+    /**
+     * Wipe the database: every table and view is dropped, so the install step
+     * can build it again and run every migration from the start. Only reached
+     * from /setup/ while setup.lock is missing — deleting that file on the
+     * server is what proves the person may do this.
+     *
+     * @return array{ok:bool,dropped:int,error:?string}
+     */
+    public function resetDatabase(): array
+    {
+        $dropped = 0;
+        try {
+            if ($this->db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite') {
+                $this->db->exec('PRAGMA foreign_keys = OFF');
+                $rows = $this->db->query("SELECT type, name FROM sqlite_master WHERE type IN ('view','table') AND name NOT LIKE 'sqlite_%' ORDER BY type = 'table'")->fetchAll(PDO::FETCH_ASSOC);
+                foreach ($rows as $r) {
+                    $this->db->exec('DROP ' . strtoupper($r['type']) . ' IF EXISTS "' . str_replace('"', '""', $r['name']) . '"');
+                    $dropped++;
+                }
+                $this->db->exec('PRAGMA foreign_keys = ON');
+                $this->db->exec('VACUUM');
+            } else {
+                $this->db->exec('SET FOREIGN_KEY_CHECKS = 0');
+                $rows = $this->db->query('SHOW FULL TABLES')->fetchAll(PDO::FETCH_NUM);
+                usort($rows, static fn($a, $b) => ($a[1] === 'VIEW' ? 0 : 1) <=> ($b[1] === 'VIEW' ? 0 : 1));
+                foreach ($rows as [$name, $type]) {
+                    $this->db->exec(($type === 'VIEW' ? 'DROP VIEW IF EXISTS `' : 'DROP TABLE IF EXISTS `') . str_replace('`', '``', $name) . '`');
+                    $dropped++;
+                }
+                $this->db->exec('SET FOREIGN_KEY_CHECKS = 1');
+            }
+        } catch (Throwable $e) {
+            error_log('Setup reset: ' . $e->getMessage());
+            return ['ok' => false, 'dropped' => $dropped, 'error' => $e->getMessage()];
+        }
+        return ['ok' => true, 'dropped' => $dropped, 'error' => null];
     }
 
     private function verifyPassword(int $userId, string $password): bool

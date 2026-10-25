@@ -10,7 +10,7 @@ ob_start();
     <div class="card border-0 shadow-sm" style="border-radius:12px;">
       <div class="card-body p-4">
         <h2 class="h5 mb-1">Excel exports</h2>
-        <p class="text-muted small mb-4">Export products, sales, and product-level profit margins for Excel.</p>
+        <p class="text-muted small mb-4">Export products, sales, and product-level profit margins for Excel. These are reports and can't be imported back. For a backup you can restore, use <a href="<?php echo public_url('super/data/backup.php'); ?>">Backup &amp; restore</a>.</p>
         <form method="get" action="<?php echo public_url('super/data/export.php'); ?>" class="row g-3">
           <div class="col-md-6">
             <label class="form-label fw-semibold">Export file</label>
