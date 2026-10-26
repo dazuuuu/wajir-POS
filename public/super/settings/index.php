@@ -124,6 +124,10 @@ ob_start();
                      value="<?php echo htmlspecialchars($__tenant['phone'] ?? ReceiptFooter::SHOP_PHONE); ?>">
             </div>
             <div class="col-md-6 mb-3">
+              <label class="form-label fw-semibold"><i class="fab fa-whatsapp me-1" style="color:#25d366"></i>WhatsApp</label>
+              <div class="form-control-plaintext small">Sender number and receipt message: <a href="<?php echo public_url('super/whatsapp/'); ?>">WhatsApp settings</a></div>
+            </div>
+            <div class="col-md-6 mb-3">
               <label class="form-label fw-semibold">Currency</label>
               <input type="text" name="currency" class="form-control" maxlength="8"
                      value="<?php echo htmlspecialchars($__tenant['currency'] ?? 'KES'); ?>">

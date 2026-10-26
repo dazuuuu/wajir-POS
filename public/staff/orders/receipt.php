@@ -223,6 +223,7 @@ if ($isDepositReceipt && $latestPayment) {
   <div class="actions">
     <div class="d-flex gap-2 mb-2">
       <button onclick="window.print()" class="btn btn-primary flex-fill"><i class="fas fa-print me-1"></i> Print</button>
+      <button type="button" data-wa-receipt="order:<?php echo (int) $id; ?>" class="btn btn-success flex-fill"><i class="fab fa-whatsapp me-1"></i> WhatsApp</button>
       <?php if ($isStaffViewer && !$isWalkin && $order['status'] === 'open'): ?>
         <a href="<?php echo public_url('staff/orders/view.php?id=' . $id); ?>" class="btn btn-outline-secondary flex-fill">Back to tab</a>
       <?php endif; ?>
@@ -245,6 +246,10 @@ if ($isDepositReceipt && $latestPayment) {
     </div>
     <?php endif; ?>
   </div>
+  <?php endif; ?>
+  <?php if (empty($_GET['embed'])): ?>
+  <script>window.WA_RECEIPT_API = <?php echo json_encode(public_url('api/receipt/whatsapp.php')); ?>;</script>
+  <script src="<?php echo htmlspecialchars(public_url('assets/js/wa-receipt.js')); ?>"></script>
   <?php endif; ?>
   <?php if ($autoPrint): ?>
   <script>

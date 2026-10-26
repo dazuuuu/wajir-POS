@@ -121,26 +121,85 @@ if (!empty($_GET['download'])) {
         $info[] = 'Period: ' . $period . ($f['type'] ? ' · ' . TransactionStatement::TYPES[$f['type']] : '') . ($f['q'] !== '' ? ' · Search: ' . $f['q'] : '')
             . ' · Money in ' . $money($tot['in']) . ' · Money out ' . $money($tot['out']);
     }
+    $mode = (string) $_GET['download'];   // all (every sheet) · sheet (the one on screen) · types (split by type)
     $x = new XlsxWriter();
-    $chunks = $rows ? array_chunk($rows, PER_SHEET) : [[]];
-    $n = 0;
-    foreach ($chunks as $i => $chunk) {
-        $data = [];
-        foreach ($chunk as $r) {
-            $data[] = $cells($r, ++$n);
+    /** Add $list as sheets of 50 named "<prefix> 1", "<prefix> 2"…; totals on the last one. */
+    $addSheets = static function (array $list, string $prefix, array $info, bool $withTotals, int $startAt = 0, int $firstNo = 1) use ($x, $cells, $cols, $title, $view, $closing): void {
+        $chunks = $list ? array_chunk($list, PER_SHEET) : [[]];
+        $n = $startAt;
+        $t = ['charge' => 0.0, 'credit' => 0.0, 'in' => 0.0, 'out' => 0.0, 'sales' => 0.0];
+        foreach ($list as $r) {
+            foreach (['charge', 'credit', 'in', 'out'] as $k) { $t[$k] += (float) ($r[$k] ?? 0); }
+            if (in_array($r['type'] ?? '', ['sale', 'credit'], true)) { $t['sales'] += (float) $r['charge']; }
         }
-        $totals = [];
-        if ($i === count($chunks) - 1 && $view !== 'customers') {
-            $totals = $view === 'customer'
-                ? ['', '', '', 'TOTAL', '', '', round($tot['charge'], 2), round($tot['credit'], 2), round($closing, 2)]
-                : ['', '', '', 'TOTAL', '', '', '', round($tot['sales'], 2), round($tot['in'], 2), round($tot['out'], 2)];
+        foreach ($chunks as $i => $chunk) {
+            $data = [];
+            foreach ($chunk as $r) {
+                $data[] = $cells($r, ++$n);
+            }
+            $totals = [];
+            if ($withTotals && $i === count($chunks) - 1 && $view !== 'customers') {
+                $totals = $view === 'customer'
+                    ? ['', '', '', 'TOTAL', '', '', round($t['charge'], 2), round($t['credit'], 2), $prefix === 'Sheet' ? round($closing, 2) : '']
+                    : ['', '', '', 'TOTAL', '', '', '', round($t['sales'], 2), round($t['in'], 2), round($t['out'], 2)];
+            }
+            $x->sheet(count($chunks) > 1 || $prefix === 'Sheet' ? $prefix . ' ' . ($i + $firstNo) : $prefix, ['title' => $title, 'info' => $info, 'columns' => $cols, 'rows' => $data, 'totals' => $totals]);
         }
-        $x->sheet('Sheet ' . ($i + 1), ['title' => $title, 'info' => $info, 'columns' => $cols, 'rows' => $data, 'totals' => $totals]);
+    };
+
+    if ($mode === 'sheet') {
+        $info[] = 'Sheet ' . $sheet . ' of ' . $sheets . ' (rows ' . (($sheet - 1) * PER_SHEET + 1) . '–' . min($total, $sheet * PER_SHEET) . ' of ' . $total . ')';
+        $addSheets(array_slice($rows, ($sheet - 1) * PER_SHEET, PER_SHEET), 'Sheet', $info, $sheet === $sheets, ($sheet - 1) * PER_SHEET, $sheet);
+        $suffix = '-sheet-' . $sheet;
+    } elseif ($mode === 'types' && $view !== 'customers') {
+        // Summary first, then each type on its own tabs.
+        $groups = [];
+        foreach ($rows as $r) {
+            if (isset(TransactionStatement::TYPES[$r['type']])) {
+                $groups[$r['type']][] = $r;
+            }
+        }
+        $sum = [];
+        foreach (TransactionStatement::TYPES as $t => $label) {
+            if (empty($groups[$t])) { continue; }
+            $g = $groups[$t];
+            $sum[] = [count($sum) + 1, $label, count($g), (int) ceil(count($g) / PER_SHEET),
+                round(array_sum(array_column($g, 'charge')), 2), round(array_sum(array_column($g, $view === 'customer' ? 'credit' : 'in')), 2),
+                round(array_sum(array_column($g, $view === 'customer' ? 'credit' : 'out')) * ($view === 'customer' ? 0 : 1), 2)];
+        }
+        $sumCols = $view === 'customer'
+            ? [['#', 6], ['Type', 18], ['Transactions', 14], ['Sheets', 9], ['Charged', 16, 'money'], ['Paid / credited', 18, 'money']]
+            : [['#', 6], ['Type', 18], ['Transactions', 14], ['Sheets', 9], ['Charged / sale value', 20, 'money'], ['Money in', 16, 'money'], ['Money out', 16, 'money']];
+        $sumRows = array_map(static fn($r) => array_slice($r, 0, count($sumCols)), $sum);
+        $x->sheet('Summary', ['title' => $title, 'info' => array_merge($info, ['Each type below has its own tabs, 50 rows per tab.']), 'columns' => $sumCols, 'rows' => $sumRows,
+            'totals' => array_slice(['', 'TOTAL', array_sum(array_column($sum, 2)), array_sum(array_column($sum, 3)), round(array_sum(array_column($sum, 4)), 2), round(array_sum(array_column($sum, 5)), 2), round(array_sum(array_column($sum, 6)), 2)], 0, count($sumCols))]);
+        foreach (TransactionStatement::TYPES as $t => $label) {
+            if (!empty($groups[$t])) {
+                $plural = ['Sale' => 'Sales', 'Credit sale' => 'Credit sales', 'Payment' => 'Payments', 'Return' => 'Returns', 'Refund paid' => 'Refunds', 'Expense' => 'Expenses', 'Salary' => 'Salaries'][$label] ?? $label;
+                $addSheets($groups[$t], $plural, array_merge($info, [$plural . ': ' . count($groups[$t]) . ' transactions']), true);
+            }
+        }
+        $suffix = '-by-type';
+    } else {
+        $addSheets($rows, 'Sheet', $info, true);
+        $suffix = $f['type'] ? '-' . preg_replace('/[^a-z]+/', '-', strtolower(TransactionStatement::TYPES[$f['type']])) : '';
     }
     $base = $view === 'customer' ? 'statement-' . preg_replace('/[^a-z0-9]+/i', '-', strtolower($person['name'])) : ($view === 'customers' ? 'customer-balances' : 'transactions');
-    $x->send(trim($base, '-') . '-' . date('Y-m-d') . '.xlsx');
+    $x->send(trim($base, '-') . $suffix . '-' . date('Y-m-d') . '.xlsx');
     exit;
 }
+
+// For the download menu: how many rows each type has under the current filters.
+$typeCounts = [];
+if ($view !== 'customers') {
+    foreach (TransactionStatement::filter($all, ['type' => ''] + $f) as $r) {
+        if (isset(TransactionStatement::TYPES[$r['type']])) {
+            $typeCounts[$r['type']] = ($typeCounts[$r['type']] ?? 0) + 1;
+        }
+    }
+}
+$plurals = ['sale' => 'sales', 'credit' => 'credit sales', 'payment' => 'payments', 'return' => 'returns', 'refund' => 'refunds', 'income' => 'income', 'expense' => 'expenses', 'salary' => 'salaries'];
+$sheetsOf = static fn(int $n): string => $n . ' row' . ($n === 1 ? '' : 's') . ' · ' . max(1, (int) ceil($n / PER_SHEET)) . ' sheet' . ((int) ceil($n / PER_SHEET) > 1 ? 's' : '');
 
 $sheetRows = array_slice($rows, ($sheet - 1) * PER_SHEET, PER_SHEET);
 $start = ($sheet - 1) * PER_SHEET;
@@ -208,6 +267,16 @@ ob_start();
   .st .tabs a.on{background:#fff;color:var(--p);font-weight:800;border-bottom:3px solid var(--p);margin-top:-1px}
   .st .tabs .info{margin-left:auto;padding:8px 10px;font-size:.78rem;color:var(--muted);white-space:nowrap;align-self:center}
   .st .empty{padding:50px 16px;text-align:center;color:var(--muted)}
+  .st details.dl{position:relative}
+  .st details.dl>summary{list-style:none;cursor:pointer}
+  .st details.dl>summary::-webkit-details-marker{display:none}
+  .st .dl-menu{position:absolute;left:0;top:calc(100% + 6px);z-index:20;background:#fff;border:1px solid var(--p-line);border-radius:10px;box-shadow:0 18px 40px rgba(59,28,110,.18);min-width:300px;max-width:360px;padding:6px}
+  .st .dl-menu a{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;color:var(--ink);text-decoration:none}
+  .st .dl-menu a:hover{background:var(--p-soft)}
+  .st .dl-menu a>i{color:var(--p);width:18px;text-align:center}
+  .st .dl-menu b{display:block;font-size:.88rem}
+  .st .dl-menu small{display:block;color:var(--muted);font-size:.76rem;line-height:1.3}
+  .st .dl-head{font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:700;padding:10px 10px 4px;border-top:1px solid var(--p-line);margin-top:4px}
   .st .rcpt{border:1px solid var(--p-line);background:#fff;color:var(--p);border-radius:6px;padding:3px 9px;font-size:.82rem;font-weight:600;display:inline-flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap}
   .st .rcpt:hover{background:var(--p);color:#fff;border-color:var(--p)}
   .st .rcpt i{font-size:.8rem}
@@ -249,7 +318,22 @@ ob_start();
       <?php endif; ?>
       <button class="btn-p" type="submit"><i class="fas fa-filter"></i>Apply</button>
       <?php if ($f['q'] !== '' || $f['type'] || $f['from'] || $f['to'] || $f['who'] || $status): ?><a class="btn-o" href="<?php echo $h(public_url('super/finances/statement.php') . ($view === 'customers' ? '?view=customers' : '')); ?>">Clear</a><?php endif; ?>
-      <a class="btn-p" href="<?php echo $h($url(['download' => 1])); ?>" style="background:#15803d"><i class="fas fa-file-excel"></i>Download Excel</a>
+      <details class="dl">
+        <summary class="btn-p" style="background:#15803d"><i class="fas fa-file-excel"></i>Download Excel <i class="fas fa-chevron-down" style="font-size:.7rem"></i></summary>
+        <div class="dl-menu">
+          <a href="<?php echo $h($url(['download' => 'all'])); ?>"><i class="fas fa-layer-group"></i><span><b>Everything<?php echo $f['type'] ? ' (' . $h(TransactionStatement::TYPES[$f['type']]) . ')' : ''; ?></b><small>All <?php echo $h($sheetsOf($total)); ?> in one file</small></span></a>
+          <a href="<?php echo $h($url(['download' => 'sheet', 'sheet' => $sheet])); ?>"><i class="fas fa-file"></i><span><b>This sheet only</b><small>Sheet <?php echo $sheet; ?> of <?php echo $sheets; ?></small></span></a>
+          <?php if ($view !== 'customers' && count($typeCounts) > 1 && !$f['type']): ?>
+          <a href="<?php echo $h($url(['download' => 'types'])); ?>"><i class="fas fa-table-columns"></i><span><b>Split by type</b><small>Summary tab, then tabs for <?php echo $h(implode(', ', array_map(static fn($t) => $plurals[$t] ?? $t, array_keys($typeCounts)))); ?></small></span></a>
+          <?php endif; ?>
+          <?php if ($view !== 'customers' && $typeCounts): ?>
+          <div class="dl-head">Only one type</div>
+          <?php foreach (TransactionStatement::TYPES as $t => $lbl): if (empty($typeCounts[$t])) continue; ?>
+          <a href="<?php echo $h($url(['type' => $t, 'download' => 'all'])); ?>"><span class="t-badge <?php echo $h($t); ?>" style="min-width:86px;text-align:center"><?php echo $h($lbl); ?></span><span><small><?php echo $h($sheetsOf($typeCounts[$t])); ?></small></span></a>
+          <?php endforeach; ?>
+          <?php endif; ?>
+        </div>
+      </details>
     </form>
 
     <nav class="views" aria-label="Views">
@@ -328,7 +412,7 @@ ob_start();
               if ($view === 'all' && $c[0] === 'Customer' && $r['who'] !== '') { $out = '<a href="' . $h($url(['who' => $r['who'], 'q' => null])) . '">' . $h($val) . '</a>'; }
               if ($c[0] === 'Reference' && !empty($r['src']) && !empty($r['src_id'])) {
                   $rUrl = public_url(($r['src'] === 'sale' ? 'super/sales/receipt.php' : 'super/orders/receipt.php') . '?id=' . (int) $r['src_id']);
-                  $out = '<button type="button" class="rcpt" data-receipt="' . $h($rUrl) . '" data-ref="' . $h($val) . '" title="Preview receipt ' . $h($val) . '"><i class="fas fa-receipt"></i>' . $h($val) . '</button>';
+                  $out = '<button type="button" class="rcpt" data-receipt="' . $h($rUrl) . '" data-ref="' . $h($val) . '" data-wa="' . $h(($r['src'] === 'sale' ? 'sale' : 'order') . ':' . (int) $r['src_id']) . '" title="Preview receipt ' . $h($val) . '"><i class="fas fa-receipt"></i>' . $h($val) . '</button>';
               }
               if ($c[0] === 'Type' && $val !== '') { $out = '<span class="t-badge ' . $h($r['type']) . '">' . $h($val) . '</span>'; }
               if ($c[0] === 'Status') { $out = '<span class="pill ' . $h($r['status']) . '">' . $h($val) . '</span>'; }
@@ -360,12 +444,20 @@ ob_start();
 <dialog class="rcpt-dlg" id="rcptDlg" aria-labelledby="rcptTitle">
   <div class="bar">
     <i class="fas fa-receipt"></i><strong id="rcptTitle">Receipt</strong>
+    <button type="button" id="rcptWa" data-wa-receipt="" style="background:#25d366;border-color:#25d366"><i class="fab fa-whatsapp me-1"></i>WhatsApp</button>
     <button type="button" id="rcptPrint"><i class="fas fa-print me-1"></i>Print</button>
     <a id="rcptOpen" href="#" target="_blank" rel="noopener"><i class="fas fa-up-right-from-square me-1"></i>Open</a>
     <button type="button" id="rcptClose" aria-label="Close">✕</button>
   </div>
   <iframe id="rcptFrame" title="Receipt preview"></iframe>
 </dialog>
+<script>window.WA_RECEIPT_API = <?php echo json_encode(public_url('api/receipt/whatsapp.php')); ?>;</script>
+<script src="<?php echo $h(public_url('assets/js/wa-receipt.js')); ?>"></script>
+<script>
+document.addEventListener('click', function (e) {
+  document.querySelectorAll('.st details.dl[open]').forEach(function (d) { if (!d.contains(e.target)) d.removeAttribute('open'); });
+});
+</script>
 <script>
 (function () {
   var dlg = document.getElementById('rcptDlg'), frame = document.getElementById('rcptFrame');
@@ -375,6 +467,7 @@ ob_start();
     var url = b.getAttribute('data-receipt');
     document.getElementById('rcptTitle').textContent = 'Receipt ' + b.getAttribute('data-ref');
     document.getElementById('rcptOpen').href = url;
+    document.getElementById('rcptWa').setAttribute('data-wa-receipt', b.getAttribute('data-wa') || '');
     frame.src = url + (url.indexOf('?') > -1 ? '&' : '?') + 'embed=1';
     if (dlg.showModal) { dlg.showModal(); } else { window.open(url, '_blank'); }
   });

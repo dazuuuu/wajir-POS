@@ -125,6 +125,7 @@ if ($moduleOn('services')) {
 
 <?php if ($menuOwner): ?>
 <a class="t-link <?php echo $menuOn('/data/backup.php'); ?>" href="<?php echo public_url('super/data/backup.php'); ?>"><i class="fas fa-database"></i><span>Backup &amp; Import</span></a>
+<a class="t-link <?php echo $menuOn('/super/whatsapp'); ?>" href="<?php echo public_url('super/whatsapp/'); ?>"><i class="fab fa-whatsapp"></i><span>WhatsApp</span></a>
 <div class="t-group <?php echo $settingsOpen ? 'open' : ''; ?>" data-nav-group>
   <button type="button" class="t-link t-group-toggle <?php echo $settingsOpen ? 'active' : ''; ?>" aria-expanded="<?php echo $settingsOpen ? 'true' : 'false'; ?>">
     <i class="fas fa-gears"></i><span>Settings</span><i class="fas fa-chevron-down t-group-caret"></i>

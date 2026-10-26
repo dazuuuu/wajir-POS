@@ -234,7 +234,7 @@ $backLinks = $isStaffViewer
   <div class="actions">
     <div class="d-flex gap-2 mb-2">
       <button onclick="window.print()" class="btn btn-primary flex-fill"><i class="fas fa-print me-1"></i> Print / Save PDF</button>
-      <a href="<?php echo htmlspecialchars($waLink); ?>" target="_blank" rel="noopener" class="btn btn-success flex-fill"><i class="fab fa-whatsapp me-1"></i> WhatsApp</a>
+      <a href="<?php echo htmlspecialchars($waLink); ?>" data-wa-receipt="sale:<?php echo (int) $id; ?>" target="_blank" rel="noopener" class="btn btn-success flex-fill"><i class="fab fa-whatsapp me-1"></i> WhatsApp</a>
     </div>
     <form method="post" class="card border-0 shadow-sm" style="border-radius:12px;">
       <div class="card-body p-3">
@@ -252,6 +252,10 @@ $backLinks = $isStaffViewer
       <?php endforeach; ?>
     </div>
   </div>
+  <?php endif; ?>
+  <?php if (empty($_GET['embed'])): ?>
+  <script>window.WA_RECEIPT_API = <?php echo json_encode(public_url('api/receipt/whatsapp.php')); ?>;</script>
+  <script src="<?php echo htmlspecialchars(public_url('assets/js/wa-receipt.js')); ?>"></script>
   <?php endif; ?>
 </body>
 </html>
