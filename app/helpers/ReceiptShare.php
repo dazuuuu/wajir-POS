@@ -108,11 +108,23 @@ class ReceiptShare
                           LEFT JOIN products p ON p.id = i.product_id AND p.tenant_id = i.tenant_id
                               WHERE i.' . ($isSale ? 'sale_id' : 'order_id') . ' = ? AND i.tenant_id = ? ORDER BY i.id');
         $it->execute([$id, $tid]);
+        $returned = [];
+        if (!$isSale) {
+            try {
+                $rq = $pdo->prepare("SELECT source_item_id, SUM(returned_quantity) q FROM product_returns WHERE tenant_id = ? AND source_type = 'order' AND source_id = ? AND undone_at IS NULL GROUP BY source_item_id");
+                $rq->execute([$tid, $id]);
+                foreach ($rq->fetchAll(PDO::FETCH_ASSOC) as $r) { $returned[(int) $r['source_item_id']] = (float) $r['q']; }
+            } catch (Throwable $e) {
+            }
+        }
         $items = [];
         foreach ($it->fetchAll(PDO::FETCH_ASSOC) as $l) {
             $q = QtyFormat::saleLine($l);
+            $ret = !empty($returned[(int) $l['id']]) ? trim(QtyFormat::saleLine(['quantity' => $returned[(int) $l['id']]] + $l)['summary_qty']) . ' returned' : '';
             $items[] = ['name' => (string) $l['product_name'], 'qty' => trim($q['summary_qty']) ?: QtyFormat::display((float) $l['quantity']),
-                'note' => in_array($q['price_note'], ['retail box', 'wholesale box'], true) ? $q['price_note'] : '',
+                'note' => trim((in_array($q['price_note'], ['retail box', 'wholesale box'], true) ? $q['price_note'] : '') . ($ret ? ' · ' . $ret : ''), ' ·'),
+                'returned' => $ret,
+                'price' => QtyFormat::linePrice($l, $q), // one unit as sold, at the sale's price
                 'total' => (float) ($l['line_total'] ?? 0)];
         }
 
@@ -167,7 +179,7 @@ class ReceiptShare
     public const PLACEHOLDERS = [
         '{shop}' => 'Shop name', '{ref}' => 'Receipt number', '{date}' => 'Date and time of the sale',
         '{customer_line}' => '"Customer: name" (left out for walk-in sales)', '{customer}' => 'Customer name ("Customer" on walk-in sales)',
-        '{items}' => 'Every item with quantity and amount, one per line', '{totals}' => 'Total, then paid and balance (or "Paid in full")',
+        '{items}' => 'Every item: quantity × unit price = amount, one per line', '{totals}' => 'Total, then paid and balance (or "Paid in full")',
         '{total}' => 'Total amount', '{balance}' => 'Balance still owed', '{due_date}' => 'Credit due date',
         '{link}' => 'Link to view / download the receipt', '{shop_whatsapp}' => 'The shop\'s WhatsApp number',
     ];
@@ -194,7 +206,7 @@ class ReceiptShare
         $m = static fn($v) => $cur . ' ' . number_format((float) $v, 2);
         $items = [];
         foreach (array_slice($d['items'], 0, 15) as $i) {
-            $items[] = '• ' . $i['name'] . ' × ' . $i['qty'] . ' — ' . number_format($i['total'], 2);
+            $items[] = '• ' . $i['name'] . ': ' . $i['qty'] . ' × ' . number_format($i['price'], 2) . ($i['returned'] ? ', ' . $i['returned'] : '') . ' = ' . number_format($i['total'], 2);
         }
         if (count($d['items']) > 15) {
             $items[] = '• … and ' . (count($d['items']) - 15) . ' more (see the receipt)';

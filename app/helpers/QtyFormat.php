@@ -131,4 +131,30 @@ class QtyFormat
             'summary_qty' => self::display($qty) . ($innerUnit !== '' ? ' ' . $innerUnit : ''),
         ];
     }
+
+    /**
+     * The price of ONE unit as shown on a receipt line (a box when sold by
+     * the box, else one piece) — the price at the time of the sale, so that
+     * PRICE × QTY = AMOUNT. saleLine()'s unit_price for boxes is the product's
+     * CURRENT box price, which drifts as prices change; this isn't.
+     * Uses the line's own amount when it fits (exact, no rounding drift);
+     * otherwise (e.g. part of the line was returned) the stored piece price.
+     */
+    public static function linePrice(array $item, ?array $shown = null): float
+    {
+        $shown ??= self::saleLine($item);
+        $qty = (float) ($item['quantity'] ?? $item['qty'] ?? 0);
+        $upp = max(1.0, (float) ($item['units_per_pack'] ?? 1));
+        $isBox = in_array($shown['price_note'], ['retail box', 'wholesale box'], true);
+        $units = $isBox ? $qty / $upp : $qty;
+        $stored = (float) ($item['unit_price'] ?? 0) * ($isBox ? $upp : 1);
+        $total = (float) ($item['line_total'] ?? 0);
+        if ($units > 0 && $total > 0) {
+            $fromAmount = $total / $units;
+            if ($stored <= 0 || abs($fromAmount - $stored) <= max(0.5, $stored * 0.01)) {
+                return round($fromAmount, 2);
+            }
+        }
+        return round($stored > 0 ? $stored : (float) $shown['unit_price'], 2);
+    }
 }

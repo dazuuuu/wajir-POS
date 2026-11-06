@@ -53,6 +53,7 @@ $methods = ['cash' => 'Cash', 'mpesa' => 'M-Pesa', 'card' => 'Card', 'bank' => '
   th{font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);text-align:left;padding:6px 0;border-bottom:1px solid var(--line)}
   td{padding:8px 0;border-bottom:1px solid #f1ebfa;vertical-align:top}
   td small{display:block;color:var(--muted);font-size:.74rem}
+  td.r,th.r{padding-left:8px}
   .r{text-align:right;white-space:nowrap}
   .tot{font-size:.9rem;padding-top:6px}
   .tot div{display:flex;justify-content:space-between;padding:3px 0}
@@ -82,10 +83,10 @@ $methods = ['cash' => 'Cash', 'mpesa' => 'M-Pesa', 'card' => 'Card', 'bank' => '
       <?php if ($d['due'] > 0.009 && $d['due_at']): ?><dt>Pay by</dt><dd><?php echo $h(date('j M Y', strtotime($d['due_at']))); ?></dd><?php endif; ?>
     </dl>
     <table>
-      <thead><tr><th>Item</th><th class="r">Qty</th><th class="r">Amount</th></tr></thead>
+      <thead><tr><th>Item</th><th class="r">Price</th><th class="r">Qty</th><th class="r">Amount</th></tr></thead>
       <tbody>
       <?php foreach ($d['items'] as $i): ?>
-        <tr><td><?php echo $h($i['name']); ?><?php if ($i['note']): ?><small><?php echo $h($i['note']); ?></small><?php endif; ?></td><td class="r"><?php echo $h($i['qty']); ?></td><td class="r"><?php echo $m($i['total']); ?></td></tr>
+        <tr><td><?php echo $h($i['name']); ?><?php if ($i['note']): ?><small><?php echo $h($i['note']); ?></small><?php endif; ?></td><td class="r"><?php echo $m($i['price']); ?></td><td class="r"><?php echo $h($i['qty']); ?></td><td class="r"><?php echo $m($i['total']); ?></td></tr>
       <?php endforeach; ?>
       </tbody>
     </table>

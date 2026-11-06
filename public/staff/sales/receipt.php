@@ -77,16 +77,16 @@ function receipt_inner(array $sale, array $items, string $shop, string $staff, a
             . '<td style="padding:4px 4px 4px 0;vertical-align:top;white-space:nowrap;">' . ((int) $idx + 1) . '</td>'
             . '<td style="padding:4px 4px 4px 0;vertical-align:top;">' . $h($it['product_name'])
             . ($nameExtra !== '' ? ' <span style="color:#000;">(' . $h($nameExtra) . ')</span>' : '') . '</td>'
+            . '<td style="padding:4px;text-align:right;vertical-align:top;white-space:nowrap;">' . amt(QtyFormat::linePrice($it, $shown)) . '</td>'
             . '<td style="padding:4px;text-align:center;vertical-align:top;white-space:nowrap;">' . $h($shown['qty_label']) . '</td>'
-            . '<td style="padding:4px;text-align:right;vertical-align:top;white-space:nowrap;">' . amt($shown['unit_price']) . '</td>'
             . '<td style="padding:4px 0 4px 4px;text-align:right;vertical-align:top;white-space:nowrap;">' . amt($it['line_total']) . '</td>'
             . '</tr>';
     }
     $thead = '<tr style="border-bottom:1px solid #cbd5e1;">'
         . '<th style="text-align:left;padding:0 4px 5px 0;font-size:16px;font-weight:900;">NO.</th>'
         . '<th style="text-align:left;padding:0 4px 5px 0;font-size:16px;font-weight:900;">ITEM</th>'
-        . '<th style="text-align:center;padding:0 4px 5px;font-size:16px;font-weight:900;">QTY</th>'
         . '<th style="text-align:right;padding:0 4px 5px;font-size:16px;font-weight:900;">PRICE</th>'
+        . '<th style="text-align:center;padding:0 4px 5px;font-size:16px;font-weight:900;">QTY</th>'
         . '<th style="text-align:right;padding:0 0 5px 4px;font-size:16px;font-weight:900;">AMT</th>'
         . '</tr>';
 

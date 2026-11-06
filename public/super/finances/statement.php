@@ -189,6 +189,127 @@ if (!empty($_GET['download'])) {
     exit;
 }
 
+// ---------- PDF (print view → "Save as PDF") ----------
+// Same choices as Excel (&pdf=all|sheet|types). A clean page in the statement's
+// design with every row, split into sheets of 50, column headings repeated on
+// each printed page, totals at the end; the print dialog opens by itself.
+if (!empty($_GET['pdf'])) {
+    $mode = (string) $_GET['pdf'];
+    $docTitle = $view === 'customer' ? 'Customer statement' : ($view === 'customers' ? 'Customer balances' : 'Transaction statement');
+    $sub = [];
+    if ($view === 'customer') {
+        $sub[] = 'Customer: ' . $person['name'] . ($person['phone'] ? ' · ' . $person['phone'] : '');
+    }
+    $sub[] = 'Period: ' . $period . ($f['type'] ? ' · ' . TransactionStatement::TYPES[$f['type']] : '') . ($f['q'] !== '' ? ' · Search: ' . $f['q'] : '') . ($status ? ' · ' . $statusLabel[$status] : '');
+    $sub[] = 'Printed ' . date('j M Y, H:i');
+    $plural = ['sale' => 'Sales', 'credit' => 'Credit sales', 'payment' => 'Payments', 'return' => 'Returns', 'refund' => 'Refunds', 'income' => 'Income', 'expense' => 'Expenses', 'salary' => 'Salaries'];
+
+    /** [[heading, rows, first row number]] — one section per sheet of 50. */
+    $sections = [];
+    $chunked = static function (array $list, string $label, int $firstNo = 1, int $startAt = 0) use (&$sections): void {
+        foreach (($list ? array_chunk($list, PER_SHEET) : [[]]) as $i => $chunk) {
+            $sections[] = [$label . ' ' . ($i + $firstNo), $chunk, $startAt + $i * PER_SHEET];
+        }
+    };
+    if ($mode === 'sheet') {
+        $chunked(array_slice($rows, ($sheet - 1) * PER_SHEET, PER_SHEET), 'Sheet', $sheet, ($sheet - 1) * PER_SHEET);
+    } elseif ($mode === 'types' && $view !== 'customers') {
+        $groups = [];
+        foreach ($rows as $r) {
+            if (isset(TransactionStatement::TYPES[$r['type']])) { $groups[$r['type']][] = $r; }
+        }
+        foreach (TransactionStatement::TYPES as $t => $_) {
+            if (!empty($groups[$t])) { $chunked($groups[$t], $plural[$t]); }
+        }
+    } else {
+        $chunked($rows, 'Sheet');
+    }
+    $isMoney = static fn($c) => ($c[2] ?? '') === 'money';
+    $fmt = static fn($v) => $v === '' || $v === null ? '' : (is_float($v) || is_int($v) ? number_format((float) $v, 2) : (string) $v);
+    header('Content-Type: text/html; charset=utf-8');
+    ?><!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title><?php echo $h($docTitle . ($view === 'customer' ? ' - ' . $person['name'] : '') . ' - ' . date('Y-m-d')); ?></title>
+<style>
+  @page{size:A4 landscape;margin:10mm}
+  *{box-sizing:border-box}
+  body{font-family:-apple-system,"Segoe UI",Roboto,Arial,sans-serif;color:#1f1630;margin:0;font-size:10.5px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .bar{position:sticky;top:0;background:#3b1c6e;color:#fff;padding:10px 16px;display:flex;gap:10px;align-items:center;z-index:5}
+  .bar b{flex:1;font-size:14px}.bar button{background:#fff;color:#3b1c6e;border:0;border-radius:6px;padding:8px 14px;font-weight:700;cursor:pointer}
+  .bar small{opacity:.8}
+  .doc{padding:14px 16px}
+  .head{display:flex;align-items:center;gap:14px;border-bottom:3px solid #6d28d9;padding-bottom:10px;margin-bottom:10px}
+  .head .mark{width:44px;height:44px;border-radius:50%;border:3px solid #6d28d9;display:grid;place-items:center;font-weight:800;color:#6d28d9;overflow:hidden;flex:none}
+  .head .mark img{width:100%;height:100%;object-fit:cover}
+  .head h1{margin:0;font-size:22px;letter-spacing:.02em;text-transform:uppercase;color:#3b1c6e;flex:1;text-align:center}
+  .head .shop{font-weight:800;color:#3b1c6e;width:220px}
+  .sub{color:#6b5e80;margin:2px 0}
+  .sum{display:flex;gap:10px;margin:10px 0 14px;flex-wrap:wrap}
+  .sum div{border:1px solid #e4d9f5;background:#f5f0fd;border-radius:6px;padding:6px 10px;min-width:130px}
+  .sum small{display:block;color:#6b5e80;text-transform:uppercase;font-size:8.5px;letter-spacing:.06em;font-weight:700}
+  .sum b{font-size:13px;color:#3b1c6e}
+  h2{font-size:12px;color:#6d28d9;margin:14px 0 4px;text-transform:uppercase;letter-spacing:.06em}
+  section{break-inside:auto}
+  section+section{break-before:page}
+  table{width:100%;border-collapse:collapse}
+  thead{display:table-header-group}
+  th{background:#6d28d9;color:#fff;text-align:left;padding:5px 6px;font-size:9.5px;border:1px solid #6d28d9}
+  td{padding:4px 6px;border:1px solid #e4d9f5;vertical-align:top}
+  tbody tr:nth-child(even) td{background:#f5f0fd}
+  tr{break-inside:avoid}
+  .n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+  .nw{white-space:nowrap}
+  .neg{color:#b91c1c}
+  tfoot{display:table-row-group} /* totals once, at the end — not repeated on every printed page */
+  tfoot td{background:#e9defb;font-weight:800;color:#3b1c6e}
+  .foot{margin-top:10px;color:#6b5e80;font-size:9px}
+  @media print{.bar{display:none}.doc{padding:0}}
+</style></head><body>
+<div class="bar"><b>📄 <?php echo $h($docTitle); ?></b><small>Choose “Save as PDF” as the printer</small><button onclick="window.print()">Save as PDF / Print</button></div>
+<div class="doc">
+  <div class="head"><span class="mark"><?php if ($logo): ?><img src="<?php echo $h($logo); ?>" alt=""><?php else: echo $h(mb_strtoupper(mb_substr($shopName, 0, 1))); endif; ?></span><span class="shop"><?php echo $h($shopName); ?></span><h1><?php echo $h($docTitle); ?></h1><span style="width:220px"></span></div>
+  <?php foreach ($sub as $line): ?><p class="sub"><?php echo $h($line); ?></p><?php endforeach; ?>
+  <div class="sum">
+    <?php if ($view === 'customer'): ?>
+      <div><small>Charged</small><b><?php echo $money($tot['charge']); ?></b></div><div><small>Paid &amp; returned</small><b><?php echo $money($tot['credit']); ?></b></div>
+      <div><small><?php echo $closing < -0.009 ? 'Shop owes customer' : 'Balance owed'; ?></small><b><?php echo $money(abs($closing)); ?></b></div>
+      <div><small>Status</small><b><?php echo $closing > 0.009 ? 'Pending balance' : ($closing < -0.009 ? 'In credit' : 'Cleared'); ?></b></div>
+    <?php elseif ($view === 'customers'): ?>
+      <div><small>Customers</small><b><?php echo number_format($total); ?></b></div><div><small>Total owed</small><b><?php echo $money(array_sum(array_map(static fn($x) => max(0, $x['balance']), $rows))); ?></b></div>
+    <?php else: ?>
+      <div><small>Transactions</small><b><?php echo number_format($total); ?></b></div><div><small>Sales value</small><b><?php echo $money($tot['sales']); ?></b></div>
+      <div><small>Money in</small><b><?php echo $money($tot['in']); ?></b></div><div><small>Money out</small><b><?php echo $money($tot['out']); ?></b></div>
+    <?php endif; ?>
+  </div>
+  <?php foreach ($sections as $si => [$heading, $chunk, $startNo]): ?>
+  <section>
+    <h2><?php echo $h($heading); ?></h2>
+    <table>
+      <thead><tr><?php foreach ($cols as $c): ?><th class="<?php echo $isMoney($c) ? 'n' : ''; ?>"><?php echo $h($c[0]); ?></th><?php endforeach; ?></tr></thead>
+      <tbody>
+      <?php if (!$chunk): ?><tr><td colspan="<?php echo count($cols); ?>" style="text-align:center;color:#6b5e80;padding:14px">No transactions.</td></tr><?php endif; ?>
+      <?php foreach ($chunk as $k => $r): $v = $cells($r, $startNo + $k + 1); ?>
+        <tr><?php foreach ($cols as $i => $c): $val = $v[$i]; $isM = $isMoney($c);
+            $cls = $isM ? 'n' . ((is_float($val) || is_int($val)) && $val < 0 ? ' neg' : '') : (in_array($c[0], ['#', 'Date', 'Reference', 'Type', 'Method', 'Phone', 'Last payment', 'Status', 'Sales', 'On credit'], true) ? 'nw' : '');
+        ?><td class="<?php echo $cls; ?>"><?php echo $h($isM ? $fmt($val) : (string) $val); ?></td><?php endforeach; ?></tr>
+      <?php endforeach; ?>
+      </tbody>
+      <?php if ($si === count($sections) - 1 && $view !== 'customers' && $mode !== 'types'): ?>
+      <tfoot><tr>
+        <?php if ($view === 'customer'): ?><td colspan="6">TOTAL · closing balance</td><td class="n"><?php echo $money($tot['charge']); ?></td><td class="n"><?php echo $money($tot['credit']); ?></td><td class="n"><?php echo $money($closing); ?></td>
+        <?php else: ?><td colspan="7">TOTAL (<?php echo number_format($total); ?> transactions)</td><td class="n"><?php echo $money($tot['sales']); ?></td><td class="n"><?php echo $money($tot['in']); ?></td><td class="n"><?php echo $money($tot['out']); ?></td><?php endif; ?>
+      </tr></tfoot>
+      <?php endif; ?>
+    </table>
+  </section>
+  <?php endforeach; ?>
+  <p class="foot"><?php echo $h($shopName); ?> · <?php echo $view === 'customer' ? 'Balance = what the customer owes after each transaction.' : 'Voided and deleted invoices are left out.'; ?></p>
+</div>
+<script>window.addEventListener('load', function () { setTimeout(function () { window.print(); }, 400); });</script>
+</body></html><?php
+    exit;
+}
+
 // For the download menu: how many rows each type has under the current filters.
 $typeCounts = [];
 if ($view !== 'customers') {
@@ -270,10 +391,14 @@ ob_start();
   .st details.dl{position:relative}
   .st details.dl>summary{list-style:none;cursor:pointer}
   .st details.dl>summary::-webkit-details-marker{display:none}
-  .st .dl-menu{position:absolute;left:0;top:calc(100% + 6px);z-index:20;background:#fff;border:1px solid var(--p-line);border-radius:10px;box-shadow:0 18px 40px rgba(59,28,110,.18);min-width:300px;max-width:360px;padding:6px}
-  .st .dl-menu a{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;color:var(--ink);text-decoration:none}
-  .st .dl-menu a:hover{background:var(--p-soft)}
-  .st .dl-menu a>i{color:var(--p);width:18px;text-align:center}
+  .st .dl-menu{position:absolute;left:0;top:calc(100% + 6px);z-index:20;background:#fff;border:1px solid var(--p-line);border-radius:10px;box-shadow:0 18px 40px rgba(59,28,110,.18);min-width:340px;max-width:420px;padding:6px}
+  .st .dl-row{display:flex;align-items:center;gap:10px;padding:8px 8px;border-radius:8px}
+  .st .dl-row:hover{background:var(--p-soft)}
+  .st .dl-row>i{color:var(--p);width:18px;text-align:center}
+  .st .dl-txt{flex:1;min-width:0}
+  .st .dl-row a{display:inline-flex;align-items:center;gap:4px;border-radius:6px;padding:5px 9px;font-size:.76rem;font-weight:700;text-decoration:none;white-space:nowrap}
+  .st .dl-x{background:#dcfce7;color:#166534}.st .dl-x:hover{background:#166534;color:#fff}
+  .st .dl-p{background:#fee2e2;color:#991b1b}.st .dl-p:hover{background:#991b1b;color:#fff}
   .st .dl-menu b{display:block;font-size:.88rem}
   .st .dl-menu small{display:block;color:var(--muted);font-size:.76rem;line-height:1.3}
   .st .dl-head{font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:700;padding:10px 10px 4px;border-top:1px solid var(--p-line);margin-top:4px}
@@ -319,19 +444,28 @@ ob_start();
       <button class="btn-p" type="submit"><i class="fas fa-filter"></i>Apply</button>
       <?php if ($f['q'] !== '' || $f['type'] || $f['from'] || $f['to'] || $f['who'] || $status): ?><a class="btn-o" href="<?php echo $h(public_url('super/finances/statement.php') . ($view === 'customers' ? '?view=customers' : '')); ?>">Clear</a><?php endif; ?>
       <details class="dl">
-        <summary class="btn-p" style="background:#15803d"><i class="fas fa-file-excel"></i>Download Excel <i class="fas fa-chevron-down" style="font-size:.7rem"></i></summary>
+        <summary class="btn-p" style="background:#15803d"><i class="fas fa-download"></i>Download <i class="fas fa-chevron-down" style="font-size:.7rem"></i></summary>
         <div class="dl-menu">
-          <a href="<?php echo $h($url(['download' => 'all'])); ?>"><i class="fas fa-layer-group"></i><span><b>Everything<?php echo $f['type'] ? ' (' . $h(TransactionStatement::TYPES[$f['type']]) . ')' : ''; ?></b><small>All <?php echo $h($sheetsOf($total)); ?> in one file</small></span></a>
-          <a href="<?php echo $h($url(['download' => 'sheet', 'sheet' => $sheet])); ?>"><i class="fas fa-file"></i><span><b>This sheet only</b><small>Sheet <?php echo $sheet; ?> of <?php echo $sheets; ?></small></span></a>
-          <?php if ($view !== 'customers' && count($typeCounts) > 1 && !$f['type']): ?>
-          <a href="<?php echo $h($url(['download' => 'types'])); ?>"><i class="fas fa-table-columns"></i><span><b>Split by type</b><small>Summary tab, then tabs for <?php echo $h(implode(', ', array_map(static fn($t) => $plurals[$t] ?? $t, array_keys($typeCounts)))); ?></small></span></a>
-          <?php endif; ?>
-          <?php if ($view !== 'customers' && $typeCounts): ?>
-          <div class="dl-head">Only one type</div>
-          <?php foreach (TransactionStatement::TYPES as $t => $lbl): if (empty($typeCounts[$t])) continue; ?>
-          <a href="<?php echo $h($url(['type' => $t, 'download' => 'all'])); ?>"><span class="t-badge <?php echo $h($t); ?>" style="min-width:86px;text-align:center"><?php echo $h($lbl); ?></span><span><small><?php echo $h($sheetsOf($typeCounts[$t])); ?></small></span></a>
-          <?php endforeach; ?>
-          <?php endif; ?>
+          <?php
+          // One row per choice, each with an Excel and a PDF button.
+          $dlRow = static function (string $icon, string $label, string $note, array $excel, array $pdf) use ($h, $url): string {
+              return '<div class="dl-row">' . $icon . '<span class="dl-txt"><b>' . $label . '</b><small>' . $note . '</small></span>'
+                  . '<a class="dl-x" href="' . $h($url($excel)) . '" title="Excel (.xlsx)"><i class="fas fa-file-excel"></i>Excel</a>'
+                  . '<a class="dl-p" href="' . $h($url($pdf)) . '" target="_blank" rel="noopener" title="PDF (opens Save as PDF)"><i class="fas fa-file-pdf"></i>PDF</a></div>';
+          };
+          echo $dlRow('<i class="fas fa-layer-group"></i>', 'Everything' . ($f['type'] ? ' (' . $h(TransactionStatement::TYPES[$f['type']]) . ')' : ''), 'All ' . $h($sheetsOf($total)), ['download' => 'all'], ['pdf' => 'all']);
+          echo $dlRow('<i class="fas fa-file"></i>', 'This sheet only', 'Sheet ' . $sheet . ' of ' . $sheets, ['download' => 'sheet', 'sheet' => $sheet], ['pdf' => 'sheet', 'sheet' => $sheet]);
+          if ($view !== 'customers' && count($typeCounts) > 1 && !$f['type']) {
+              echo $dlRow('<i class="fas fa-table-columns"></i>', 'Split by type', $h(ucfirst(implode(', ', array_map(static fn($t) => $plurals[$t] ?? $t, array_keys($typeCounts))))), ['download' => 'types'], ['pdf' => 'types']);
+          }
+          if ($view !== 'customers' && $typeCounts) {
+              echo '<div class="dl-head">Only one type</div>';
+              foreach (TransactionStatement::TYPES as $t => $lbl) {
+                  if (empty($typeCounts[$t])) { continue; }
+                  echo $dlRow('', '<span class="t-badge ' . $h($t) . '">' . $h($lbl) . '</span>', $h($sheetsOf($typeCounts[$t])), ['type' => $t, 'download' => 'all'], ['type' => $t, 'pdf' => 'all']);
+              }
+          }
+          ?>
         </div>
       </details>
     </form>

@@ -14,6 +14,14 @@ if (!$order) {
     exit;
 }
 $items = $O->items($id);
+// Returned quantities per line: the line's amount was lowered by the return,
+// so the receipt says so next to the quantity.
+$returnedQty = [];
+try {
+    $rq = $pdo->prepare("SELECT source_item_id, SUM(returned_quantity) q FROM product_returns WHERE tenant_id = ? AND source_type = 'order' AND source_id = ? AND undone_at IS NULL GROUP BY source_item_id");
+    $rq->execute([(int) TenantContext::tenantId(), $id]);
+    foreach ($rq->fetchAll() as $r) { $returnedQty[(int) $r['source_item_id']] = (float) $r['q']; }
+} catch (\Throwable $e) {}
 $payments = $O->payments($id);
 $isWalkin = ($order['channel'] ?? 'tab') === 'walkin';
 $tenant   = (new Models\TenantModel($pdo))->find(TenantContext::tenantId());
@@ -123,17 +131,19 @@ if ($isDepositReceipt && $latestPayment) {
 
     <table style="width:100%;border-collapse:collapse;font-size:16px;">
       <tr style="border-bottom:1px solid #cbd5e1;">
-        <th style="text-align:left;padding:0 4px 5px 0;font-size:16px;font-weight:900;">NO.</th>
+        <th style="text-align:left;padding:0 3px 5px 0;font-size:16px;font-weight:900;width:1%;">#</th>
         <th style="text-align:left;padding:0 4px 5px 0;font-size:16px;font-weight:900;">ITEM</th>
+        <th style="text-align:right;padding:0 4px 5px;font-size:16px;font-weight:900;">PRICE</th>
         <th style="text-align:center;padding:0 4px 5px;font-size:16px;font-weight:900;">QTY</th>
         <th style="text-align:right;padding:0 0 5px 4px;font-size:16px;font-weight:900;">AMT</th>
       </tr>
       <?php foreach ($items as $idx => $it): ?>
       <tr>
-        <td style="padding:4px 4px 4px 0;vertical-align:top;"><?php echo (int) $idx + 1; ?></td>
-        <td style="padding:4px 4px 4px 0;"><?php echo htmlspecialchars($it['product_name']); ?></td>
-        <td style="padding:4px;text-align:center;"><?php
-          $shown = QtyFormat::saleLine($it);
+        <td style="padding:4px 3px 4px 0;vertical-align:top;width:1%;"><?php echo (int) $idx + 1; ?></td>
+        <td style="padding:4px 4px 4px 0;vertical-align:top;word-break:break-word;"><?php echo htmlspecialchars($it['product_name']); ?></td>
+        <?php $shown = QtyFormat::saleLine($it); // price of ONE unit as sold (a box, when sold by the box) ?>
+        <td style="padding:4px;text-align:right;white-space:nowrap;vertical-align:top;font-size:14px;"><?php echo number_format(QtyFormat::linePrice($it, $shown), 2); ?></td>
+        <td style="padding:4px;text-align:center;vertical-align:top;"><?php
           echo htmlspecialchars($shown['qty_label']);
           if ($shown['unit_label'] !== '') {
               echo ' <span style="font-size:12px;">' . htmlspecialchars($shown['unit_label']) . '</span>';
@@ -141,12 +151,16 @@ if ($isDepositReceipt && $latestPayment) {
           if ($shown['price_note'] === 'retail box' || $shown['price_note'] === 'wholesale box' || $shown['price_note'] === 'retail box + items') {
               echo '<div style="font-size:12px;color:#64748b;">' . htmlspecialchars($shown['price_note']) . '</div>';
           }
+          if (!empty($returnedQty[(int) $it['id']])) {
+              $rShown = QtyFormat::saleLine(['quantity' => $returnedQty[(int) $it['id']]] + $it);
+              echo '<div style="font-size:12px;color:#b91c1c;font-weight:700;">' . htmlspecialchars(trim($rShown['summary_qty'])) . ' returned</div>';
+          }
           $halfNote = QtyFormat::halfNote((float) $it['quantity']);
           if ($halfNote !== '') {
               echo '<div style="font-size:12px;color:#64748b;">' . htmlspecialchars($halfNote) . '</div>';
           }
         ?></td>
-        <td style="padding:4px 0 4px 4px;text-align:right;"><?php echo number_format((float) $it['line_total'], 2); ?></td>
+        <td style="padding:4px 0 4px 4px;text-align:right;vertical-align:top;white-space:nowrap;"><?php echo number_format((float) $it['line_total'], 2); ?></td>
       </tr>
       <?php endforeach; ?>
     </table>
